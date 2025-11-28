@@ -36,13 +36,89 @@ const app = initializeApp(firebaseConfig)
 const auth = getAuth(app)
 const db = getFirestore(app)
 
+// Sistema de temas
+const THEMES = {
+  light: {
+    name: '🌞 Claro',
+    colors: {
+      primary: '#2563eb',
+      primaryDark: '#1d4ed8',
+      bgPrimary: '#ffffff',
+      bgSecondary: '#f8fafc',
+      bgTertiary: '#f1f5f9',
+      textPrimary: '#000000',
+      textSecondary: '#374151',
+      textTertiary: '#6b7280',
+      border: '#e5e7eb'
+    }
+  },
+  dark: {
+    name: '🌙 Escuro',
+    colors: {
+      primary: '#3b82f6',
+      primaryDark: '#2563eb',
+      bgPrimary: '#0f172a',
+      bgSecondary: '#1e293b',
+      bgTertiary: '#334155',
+      textPrimary: '#f8fafc',
+      textSecondary: '#cbd5e1',
+      textTertiary: '#94a3b8',
+      border: '#475569'
+    }
+  },
+  nature: {
+    name: '🌿 Natureza',
+    colors: {
+      primary: '#059669',
+      primaryDark: '#047857',
+      bgPrimary: '#f0fdf4',
+      bgSecondary: '#dcfce7',
+      bgTertiary: '#bbf7d0',
+      textPrimary: '#052e16',
+      textSecondary: '#166534',
+      textTertiary: '#15803d',
+      border: '#86efac'
+    }
+  },
+  royal: {
+    name: '👑 Real',
+    colors: {
+      primary: '#7c3aed',
+      primaryDark: '#6d28d9',
+      bgPrimary: '#faf5ff',
+      bgSecondary: '#f3e8ff',
+      bgTertiary: '#e9d5ff',
+      textPrimary: '#1e1b4b',
+      textSecondary: '#3730a3',
+      textTertiary: '#5b21b6',
+      border: '#c4b5fd'
+    }
+  },
+  midnight: {
+    name: '🌌 Meia-Noite',
+    colors: {
+      primary: '#f59e0b',
+      primaryDark: '#d97706',
+      bgPrimary: '#1e1b4b',
+      bgSecondary: '#312e81',
+      bgTertiary: '#4338ca',
+      textPrimary: '#f8fafc',
+      textSecondary: '#e2e8f0',
+      textTertiary: '#cbd5e1',
+      border: '#4f46e5'
+    }
+  }
+}
+
 // Sistema de fontes para o chat
 const CHAT_FONTS = {
   default: { name: 'Padrão', family: 'Inter, sans-serif' },
   serif: { name: 'Elegante', family: 'Georgia, serif' },
   monospace: { name: 'Code', family: 'Monaco, monospace' },
   comic: { name: 'Divertida', family: 'Comic Sans MS, cursive' },
-  fantasy: { name: 'Fantasia', family: 'Papyrus, fantasy' }
+  fantasy: { name: 'Fantasia', family: 'Papyrus, fantasy' },
+  modern: { name: 'Moderna', family: 'SF Pro Display, sans-serif' },
+  classic: { name: 'Clássica', family: 'Times New Roman, serif' }
 }
 
 function App() {
@@ -66,10 +142,80 @@ function App() {
   const [activeView, setActiveView] = useState('new')
   const [firebaseError, setFirebaseError] = useState(null)
   const [selectedFont, setSelectedFont] = useState('default')
+  const [selectedTheme, setSelectedTheme] = useState('light')
   const [showCharacterModal, setShowCharacterModal] = useState(false)
+  const [showSettingsModal, setShowSettingsModal] = useState(false)
+  const [autoSave, setAutoSave] = useState(true)
+  const [typingSpeed, setTypingSpeed] = useState('normal')
+  const [showQuickActions, setShowQuickActions] = useState(false)
+  const [lastSaveTime, setLastSaveTime] = useState(null)
+  const [wordCount, setWordCount] = useState(0)
+  const [isEditing, setIsEditing] = useState(false)
 
   const messagesEndRef = useRef(null)
   const appRef = useRef(null)
+  const saveTimeoutRef = useRef(null)
+
+  // Aplicar tema dinamicamente
+  useEffect(() => {
+    const theme = THEMES[selectedTheme]
+    const root = document.documentElement
+    
+    Object.entries(theme.colors).forEach(([key, value]) => {
+      root.style.setProperty(`--${key}`, value)
+    })
+    
+    // Salvar tema no localStorage
+    localStorage.setItem('selectedTheme', selectedTheme)
+  }, [selectedTheme])
+
+  // Carregar preferências salvas
+  useEffect(() => {
+    const savedTheme = localStorage.getItem('selectedTheme')
+    const savedFont = localStorage.getItem('selectedFont')
+    const savedAutoSave = localStorage.getItem('autoSave')
+    
+    if (savedTheme) setSelectedTheme(savedTheme)
+    if (savedFont) setSelectedFont(savedFont)
+    if (savedAutoSave !== null) setAutoSave(JSON.parse(savedAutoSave))
+  }, [])
+
+  // Salvar preferências
+  useEffect(() => {
+    localStorage.setItem('selectedFont', selectedFont)
+    localStorage.setItem('autoSave', JSON.stringify(autoSave))
+  }, [selectedFont, autoSave])
+
+  // Auto-save quando mensagens mudam
+  useEffect(() => {
+    if (autoSave && user && currentStoryId && messages.length > 0) {
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current)
+      }
+      
+      saveTimeoutRef.current = setTimeout(() => {
+        updateStoryInFirestore(currentStoryId, {
+          messages: messages,
+          lastMessage: messages[messages.length - 1]?.content?.substring(0, 100) || ''
+        })
+        setLastSaveTime(new Date())
+      }, 2000)
+    }
+    
+    return () => {
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current)
+      }
+    }
+  }, [messages, autoSave, user, currentStoryId])
+
+  // Calcular contagem de palavras
+  useEffect(() => {
+    const words = messages.reduce((count, message) => {
+      return count + (message.content?.split(/\s+/).length || 0)
+    }, 0)
+    setWordCount(words)
+  }, [messages])
 
   // Auth state listener
   useEffect(() => {
@@ -161,15 +307,28 @@ function App() {
         ...updates,
         updatedAt: serverTimestamp()
       })
+      console.log('💾 História salva automaticamente')
     } catch (error) {
       console.error('Error updating story:', error)
       setFirebaseError('Erro ao atualizar história: ' + error.message)
     }
   }
 
+  // Manual save
+  const manualSave = async () => {
+    if (user && currentStoryId) {
+      await updateStoryInFirestore(currentStoryId, {
+        messages: messages,
+        lastMessage: messages[messages.length - 1]?.content?.substring(0, 100) || ''
+      })
+      setLastSaveTime(new Date())
+      alert('✅ História salva com sucesso!')
+    }
+  }
+
   // Character management
   const addCharacter = () => {
-    if (newCharacter.trim() && !characters.includes(newCharacter.trim())) {
+    if (newCharacter.trim() && !characters.some(c => c.name === newCharacter.trim())) {
       setCharacters([...characters, {
         name: newCharacter.trim(),
         description: '',
@@ -338,13 +497,6 @@ function App() {
       if (data.success) {
         const finalMessages = data.history || updatedMessages
         setMessages(finalMessages)
-
-        if (user && currentStoryId) {
-          await updateStoryInFirestore(currentStoryId, {
-            messages: finalMessages,
-            lastMessage: userMessage.substring(0, 100)
-          })
-        }
       } else {
         alert('Erro ao continuar história: ' + data.error)
         setMessages(prev => prev.filter(msg => msg !== userMessageObj))
@@ -357,6 +509,39 @@ function App() {
     setLoading(false)
   }
 
+  // Quick actions
+  const quickActions = [
+    {
+      label: '🧭 Explorar',
+      prompt: 'Explorar os arredores em busca de pistas, itens ou pontos de interesse.'
+    },
+    {
+      label: '💬 Dialogar',
+      prompt: 'Iniciar uma conversa com os personagens presentes para obter informações.'
+    },
+    {
+      label: '⚔️ Atacar',
+      prompt: 'Preparar-se para o combate e atacar a ameaça mais próxima.'
+    },
+    {
+      label: '🎭 Agir',
+      prompt: 'Realizar uma ação específica baseada na situação atual.'
+    },
+    {
+      label: '🔍 Investigar',
+      prompt: 'Examinar cuidadosamente o ambiente atual em busca de detalhes importantes.'
+    },
+    {
+      label: '🏃 Fugir',
+      prompt: 'Tentar escapar da situação atual de forma rápida e segura.'
+    }
+  ]
+
+  const useQuickAction = (prompt) => {
+    setUserInput(prompt)
+    setShowQuickActions(false)
+  }
+
   const handleKeyPress = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
@@ -366,19 +551,40 @@ function App() {
         startStory()
       }
     }
+    
+    // Atalhos de teclado
+    if (e.ctrlKey || e.metaKey) {
+      switch(e.key) {
+        case 's':
+          e.preventDefault()
+          manualSave()
+          break
+        case 'e':
+          e.preventDefault()
+          exportStory()
+          break
+        case 'n':
+          e.preventDefault()
+          if (activeView === 'chat') resetStory()
+          break
+      }
+    }
   }
 
   const resetStory = () => {
-    setStoryStarted(false)
-    setMessages([])
-    setTitle('')
-    setContext('')
-    setCharacters([])
-    setUserInput('')
-    setCurrentStoryId(null)
-    setActiveView('new')
-    setSelectedGenres(['fantasy'])
-    setIsAdult(false)
+    if (window.confirm('Tem certeza que deseja começar uma nova história? O progresso atual será perdido.')) {
+      setStoryStarted(false)
+      setMessages([])
+      setTitle('')
+      setContext('')
+      setCharacters([])
+      setUserInput('')
+      setCurrentStoryId(null)
+      setActiveView('new')
+      setSelectedGenres(['fantasy'])
+      setIsAdult(false)
+      setIsEditing(false)
+    }
   }
 
   const loadStory = (story) => {
@@ -392,6 +598,7 @@ function App() {
     setCurrentStoryId(story.id)
     setStoryStarted(true)
     setActiveView('chat')
+    setIsEditing(false)
   }
 
   const exportStory = () => {
@@ -410,7 +617,7 @@ function App() {
     document.body.removeChild(a)
     URL.revokeObjectURL(url)
     
-    alert('História exportada com sucesso!')
+    alert('📖 História exportada com sucesso!')
   }
 
   const resetAppState = () => {
@@ -424,6 +631,7 @@ function App() {
     setActiveView('new')
     setSelectedGenres(['fantasy'])
     setIsAdult(false)
+    setIsEditing(false)
   }
 
   const formatDate = (timestamp) => {
@@ -433,6 +641,19 @@ function App() {
       hour: '2-digit',
       minute: '2-digit'
     })
+  }
+
+  const formatTimeAgo = (timestamp) => {
+    if (!timestamp) return ''
+    const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp)
+    const now = new Date()
+    const diffMs = now - date
+    const diffMins = Math.floor(diffMs / 60000)
+    
+    if (diffMins < 1) return 'Agora mesmo'
+    if (diffMins < 60) return `${diffMins} min atrás`
+    if (diffMins < 1440) return `${Math.floor(diffMins / 60)} h atrás`
+    return formatDate(timestamp)
   }
 
   // Available genres
@@ -455,7 +676,7 @@ function App() {
           <div className="auth-header">
             <div className="logo">📖</div>
             <h1>Chronicles of Choice</h1>
-            <p>Crie histórias épicas com personagens customizados</p>
+            <p>Crie histórias épicas sem limites</p>
           </div>
           
           {firebaseError && (
@@ -468,19 +689,19 @@ function App() {
           
           <div className="auth-features">
             <div className="feature">
-              <span className="feature-icon">🎮</span>
-              <h3>Multiplos Gêneros</h3>
-              <p>Combine fantasia, sci-fi, romance e mais</p>
-            </div>
-            <div className="feature">
-              <span className="feature-icon">👥</span>
-              <h3>Personagens Customizados</h3>
-              <p>Crie e gerencie seu próprio elenco</p>
+              <span className="feature-icon">🚀</span>
+              <h3>Sem Limites</h3>
+              <p>Histórias longas e complexas sem restrições</p>
             </div>
             <div className="feature">
               <span className="feature-icon">🎨</span>
-              <h3>Chat Personalizado</h3>
-              <p>Múltiplas fontes e temas</p>
+              <h3>Temas Personalizáveis</h3>
+              <p>Interface com múltiplos temas de cores</p>
+            </div>
+            <div className="feature">
+              <span className="feature-icon">💾</span>
+              <h3>Auto-save Inteligente</h3>
+              <p>Seu progresso é salvo automaticamente</p>
             </div>
           </div>
 
@@ -585,6 +806,123 @@ function App() {
         </div>
       )}
 
+      {/* Settings Modal */}
+      {showSettingsModal && (
+        <div className="modal-overlay">
+          <div className="modal-content">
+            <div className="modal-header">
+              <h3>⚙️ Configurações</h3>
+              <button onClick={() => setShowSettingsModal(false)}>✕</button>
+            </div>
+            <div className="settings-content">
+              <div className="setting-group">
+                <h4>🎨 Tema de Cores</h4>
+                <div className="theme-grid">
+                  {Object.entries(THEMES).map(([key, theme]) => (
+                    <button
+                      key={key}
+                      className={`theme-btn ${selectedTheme === key ? 'active' : ''}`}
+                      onClick={() => setSelectedTheme(key)}
+                      style={{
+                        background: theme.colors.bgPrimary,
+                        color: theme.colors.textPrimary,
+                        border: `2px solid ${selectedTheme === key ? theme.colors.primary : theme.colors.border}`
+                      }}
+                    >
+                      {theme.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="setting-group">
+                <h4>🔤 Fonte do Chat</h4>
+                <select 
+                  value={selectedFont}
+                  onChange={(e) => setSelectedFont(e.target.value)}
+                  className="font-selector"
+                >
+                  {Object.entries(CHAT_FONTS).map(([key, font]) => (
+                    <option key={key} value={key}>
+                      {font.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="setting-group">
+                <h4>💾 Auto-save</h4>
+                <label className="toggle-setting">
+                  <input
+                    type="checkbox"
+                    checked={autoSave}
+                    onChange={(e) => setAutoSave(e.target.checked)}
+                  />
+                  <span className="toggle-slider"></span>
+                  <span>Salvar automaticamente</span>
+                </label>
+                {lastSaveTime && (
+                  <p className="save-info">
+                    Último save: {formatTimeAgo(lastSaveTime)}
+                  </p>
+                )}
+              </div>
+
+              <div className="setting-group">
+                <h4>⌨️ Atalhos de Teclado</h4>
+                <div className="shortcuts-list">
+                  <div className="shortcut-item">
+                    <kbd>Ctrl</kbd> + <kbd>S</kbd>
+                    <span>Salvar história</span>
+                  </div>
+                  <div className="shortcut-item">
+                    <kbd>Ctrl</kbd> + <kbd>E</kbd>
+                    <span>Exportar história</span>
+                  </div>
+                  <div className="shortcut-item">
+                    <kbd>Ctrl</kbd> + <kbd>N</kbd>
+                    <span>Nova história</span>
+                  </div>
+                  <div className="shortcut-item">
+                    <kbd>Enter</kbd>
+                    <span>Enviar mensagem</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div className="modal-actions">
+              <button 
+                onClick={() => setShowSettingsModal(false)}
+                className="modal-confirm-btn"
+              >
+                ✅ Concluído
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Quick Actions Panel */}
+      {showQuickActions && (
+        <div className="quick-actions-panel">
+          <div className="quick-actions-header">
+            <h4>🚀 Ações Rápidas</h4>
+            <button onClick={() => setShowQuickActions(false)}>✕</button>
+          </div>
+          <div className="quick-actions-grid">
+            {quickActions.map((action, index) => (
+              <button
+                key={index}
+                className="quick-action-btn"
+                onClick={() => useQuickAction(action.prompt)}
+              >
+                {action.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <header className="app-header">
         <div className="header-left">
@@ -611,26 +949,47 @@ function App() {
 
           {activeView === 'chat' && (
             <>
-              {/* Font Selector */}
-              <select 
-                value={selectedFont}
-                onChange={(e) => setSelectedFont(e.target.value)}
-                className="font-selector"
-                title="Escolher fonte do chat"
-              >
-                {Object.entries(CHAT_FONTS).map(([key, font]) => (
-                  <option key={key} value={key}>
-                    {font.name}
-                  </option>
-                ))}
-              </select>
+              {/* Stats */}
+              <div className="header-stats">
+                <span className="stat-item">📝 {wordCount} palavras</span>
+                <span className="stat-item">💬 {messages.length} mensagens</span>
+                {lastSaveTime && autoSave && (
+                  <span className="stat-item save-indicator" title={`Salvo: ${formatTimeAgo(lastSaveTime)}`}>
+                    💾
+                  </span>
+                )}
+              </div>
 
-              <button className="header-btn" onClick={exportStory} title="Exportar História">
-                💾 Exportar
+              <button 
+                className="header-btn"
+                onClick={() => setShowQuickActions(!showQuickActions)}
+                title="Ações Rápidas"
+              >
+                🚀 Ações
+              </button>
+
+              <button 
+                className="header-btn"
+                onClick={manualSave}
+                title="Salvar Manualmente (Ctrl+S)"
+              >
+                💾 Salvar
+              </button>
+
+              <button className="header-btn" onClick={exportStory} title="Exportar História (Ctrl+E)">
+                📤 Exportar
               </button>
             </>
           )}
           
+          <button 
+            className="header-btn" 
+            onClick={() => setShowSettingsModal(true)}
+            title="Configurações"
+          >
+            ⚙️
+          </button>
+
           <button 
             className="header-btn" 
             onClick={toggleFullscreen}
@@ -659,6 +1018,7 @@ function App() {
                 </div>
                 <div className="user-stats">
                   <small>{savedStories.length} histórias salvas</small>
+                  <small>{wordCount} palavras totais</small>
                 </div>
                 <button className="menu-item" onClick={handleSignOut}>
                   🚪 Sair
@@ -676,7 +1036,7 @@ function App() {
           <div className="start-screen">
             <div className="welcome-section">
               <h2>Olá, {user.displayName}! 👋</h2>
-              <p>Crie sua próxima grande aventura</p>
+              <p>Crie sua próxima grande aventura sem limites</p>
             </div>
 
             <div className="setup-panel">
@@ -788,22 +1148,25 @@ function App() {
                     </div>
                   </section>
 
-                  {/* Context Input */}
+                  {/* Context Input - SEM LIMITES */}
                   <section className="context-section">
-                    <h3>✨ Contexto da História</h3>
+                    <div className="context-header">
+                      <h3>✨ Contexto da História</h3>
+                      <span className="context-hint">Sem limites de caracteres!</span>
+                    </div>
                     <div className="context-input-wrapper">
                       <textarea
                         value={context}
                         onChange={(e) => setContext(e.target.value)}
                         placeholder={`Descreva o mundo, situação inicial ou background da história...
 
-Exemplo: "Em um reino onde a magia é proibida, um jovem aprendiz descobre que possui poderes ancestrais. Enquanto isso, uma guerra se aproxima das fronteiras..."`}
-                        rows="6"
-                        className="context-textarea"
+🎯 Dica: Seja detalhado! Quanto mais contexto você fornecer, mais rica e coerente será a história.
+
+Exemplo extenso:
+"Em um reino onde a magia é proibida há séculos, um jovem aprendiz de ferreiro chamado Kael descobre que possui poderes ancestrais herdados de uma linhagem esquecida. Enquanto isso, uma guerra se aproxima das fronteiras do reino de Eldoria, ameaçada pelo império vizinho de Vorlag. Kael precisa esconder seus poderes enquanto busca respostas sobre seu passado, encontrando aliados inesperados e inimigos ocultos em cada esquina. O destino do reino pode depender de suas escolhas..."`}
+                        rows="8"
+                        className="context-textarea unlimited"
                       />
-                      <div className="textarea-footer">
-                        <span>{context.length}/2000 caracteres</span>
-                      </div>
                     </div>
                   </section>
                 </div>
@@ -819,7 +1182,7 @@ Exemplo: "Em um reino onde a magia é proibida, um jovem aprendiz descobre que p
                   {loading ? (
                     <>
                       <div className="spinner"></div>
-                      Criando Mundo...
+                      Criando Mundo Épico...
                     </>
                   ) : (
                     '🚀 Iniciar Aventura Épica'
@@ -904,7 +1267,9 @@ Exemplo: "Em um reino onde a magia é proibida, um jovem aprendiz descobre que p
                   {isAdult && <span className="adult-tag">+18</span>}
                   <span className="message-count">{messages.length} mensagens</span>
                   {currentStoryId && (
-                    <span className="saved-badge">💾 Salvo</span>
+                    <span className="saved-badge">
+                      {autoSave ? '💾 Auto' : '💾 Salvo'}
+                    </span>
                   )}
                 </div>
               </div>
@@ -977,7 +1342,7 @@ Exemplo: "Em um reino onde a magia é proibida, um jovem aprendiz descobre que p
                   placeholder="Descreva sua ação, fale com personagens ou tome decisões importantes..."
                   rows="3"
                   disabled={loading}
-                  className="message-input"
+                  className="message-input unlimited"
                   style={{ fontFamily: CHAT_FONTS[selectedFont].family }}
                 />
                 <button
@@ -989,8 +1354,9 @@ Exemplo: "Em um reino onde a magia é proibida, um jovem aprendiz descobre que p
                 </button>
               </div>
               <div className="input-hint">
-                Pressione Enter para enviar • Shift+Enter para nova linha
-                {currentStoryId && ' • Salvamento automático ativo'}
+                <span>Enter para enviar • Shift+Enter para nova linha</span>
+                {autoSave && <span className="auto-save-indicator"> • 💾 Auto-save ativo</span>}
+                <span className="shortcut-hint"> • Ctrl+S: Salvar • Ctrl+E: Exportar • Ctrl+N: Nova</span>
               </div>
             </div>
           </div>
