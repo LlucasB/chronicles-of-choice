@@ -7,10 +7,10 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Armazenamento em memória (em produção usaríamos database)
+// Armazenamento em memória (simples para MVP)
 const userSessions = new Map();
 
-// Configuração CORS
+// CORS configurado corretamente
 app.use(cors({
   origin: [
     'https://chronicles-frontend.vercel.app',
@@ -22,78 +22,98 @@ app.use(cors({
 
 app.use(express.json());
 
-// Middleware de log
+// Middleware de log melhorado
 app.use((req, res, next) => {
-  console.log('📍 Nova requisição:', req.method, req.url);
+  console.log('🔥', new Date().toISOString(), req.method, req.url, req.body || '');
   next();
 });
 
-// Health check
+// ✅ ROTA HEALTH CHECK (já funciona)
 app.get('/health', (req, res) => {
-  res.json({ status: 'OK', message: 'Chronicles Backend Running' });
+  console.log('✅ Health check OK');
+  res.json({ 
+    status: 'OK', 
+    message: 'Chronicles Backend Running',
+    timestamp: new Date().toISOString()
+  });
 });
 
-// Sistemas de Modos
+// ✅ SISTEMA DE MODOS
 const GAME_MODES = {
   adventure: {
     name: "🎮 Modo Aventura",
     systemPrompt: `Você é um mestre de RPG especializado em aventuras épicas. Crie narrativas emocionantes com:
-    - Missões perigosas e recompensas
-    - Combates estratégicos 
-    - Exploração de mundos fantásticos
-    - NPCs memoráveis com personalidades únicas
-    - Escolhas que impactam a história
-    
-    Mantenha a história coerente e lembre-se de todos os eventos anteriores.`
+- Missões perigosas e recompensas
+- Combates estratégicos 
+- Exploração de mundos fantásticos
+- NPCs memoráveis
+- Escolhas que impactam a história
+
+Mantenha a história coerente e lembre-se de todos os eventos anteriores.`
   },
   romance: {
     name: "💖 Modo Romance", 
     systemPrompt: `Você é um escritor especializado em romances interativos. Crie:
-    - Desenvolvimento de relacionamentos profundos
-    - Diálogos emocionantes e românticos
-    - Conflitos emocionais significativos
-    - Momentos de intimidade e conexão
-    - Personagens complexos e cativantes
-    
-    Construa relacionamentos orgânicos baseados nas escolhas do usuário.`
+- Desenvolvimento de relacionamentos profundos
+- Diálogos emocionantes e românticos
+- Conflitos emocionais significativos
+- Momentos de intimidade e conexão
+- Personagens complexos e cativantes
+
+Construa relacionamentos orgânicos baseados nas escolhas do usuário.`
   },
   horror: {
     name: "👻 Modo Horror",
     systemPrompt: `Você é um mestre do horror e suspense. Crie:
-    - Atmosfera tensa e assustadora
-    - Sustos psicológicos bem construídos
-    - Mistérios sobrenaturais
-    - Decisões de vida ou morte
-    - Ambiente claustrofóbico e opressivo
-    
-    Use o medo do desconhecido e mantenha a tensão constante.`
+- Atmosfera tensa e assustadora
+- Sustos psicológicos bem construídos
+- Mistérios sobrenaturais
+- Decisões de vida ou morte
+- Ambiente claustrofóbico
+
+Use o medo do desconhecido e mantenha a tensão constante.`
   },
   fantasy: {
     name: "🐉 Modo Fantasia Épica",
     systemPrompt: `Você é um contador de histórias de fantasia. Crie:
-    - Mundos mágicos detalhados
-    - Criaturas mitológicas e raças únicas
-    - Sistemas de magia complexos
-    - Profecias e destinos
-    - Batalhas épicas e jornadas heróicas
-    
-    Desenvolva lore rica e histórias que se conectam.`
-  },
-  scifi: {
-    name: "🚀 Modo Ficção Científica", 
-    systemPrompt: `Você é um escritor de ficção científica. Crie:
-    - Tecnologias avançadas e suas consequências
-    - Sociedades futuristas e distopias
-    - Exploração espacial e alienígenas
-    - Dilemas éticos da tecnologia
-    - Universos científicos consistentes
-    
-    Mantenha a base científica plausível dentro do universo.`
+- Mundos mágicos detalhados
+- Criaturas mitológicas e raças únicas
+- Sistemas de magia complexos
+- Profecias e destinos
+- Batalhas épicas e jornadas heróicas
+
+Desenvolva lore rica e histórias que se conectam.`
   }
 };
 
-// Rota para iniciar uma nova história
+// ✅ ROTA: LISTAR MODOS DISPONÍVEIS
+app.get('/api/modes', (req, res) => {
+  console.log('📚 Listando modos disponíveis');
+  
+  try {
+    const modes = Object.entries(GAME_MODES).map(([key, value]) => ({
+      id: key,
+      name: value.name,
+      description: value.systemPrompt.substring(0, 120) + '...'
+    }));
+    
+    res.json({
+      success: true,
+      modes
+    });
+  } catch (error) {
+    console.error('❌ Erro em /api/modes:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Erro interno ao carregar modos'
+    });
+  }
+});
+
+// ✅ ROTA: INICIAR NOVA HISTÓRIA
 app.post('/api/start-story', async (req, res) => {
+  console.log('🎯 Iniciando nova história:', req.body);
+  
   try {
     const { userId, context, mode = 'adventure' } = req.body;
     
@@ -114,12 +134,7 @@ app.post('/api/start-story', async (req, res) => {
       messages: [
         {
           role: "system",
-          content: `${selectedMode.systemPrompt}
-          
-          CONTEXTO INICIAL PROVIDENCIADO PELO USUÁRIO:
-          ${context}
-          
-          Agora, comece a história baseada neste contexto, dando as boas-vindas ao jogador e apresentando a primeira situação.`
+          content: `${selectedMode.systemPrompt}\n\nCONTEXTO INICIAL: ${context}\n\nComece a história dando as boas-vindas ao jogador e apresentando a primeira situação.`
         }
       ],
       createdAt: new Date(),
@@ -129,6 +144,7 @@ app.post('/api/start-story', async (req, res) => {
     userSessions.set(userId, session);
     
     // Gerar primeira mensagem da IA
+    console.log('🤖 Chamando Mistral API...');
     const aiResponse = await generateAIResponse(session.messages);
     
     // Adicionar resposta da IA ao histórico
@@ -140,7 +156,7 @@ app.post('/api/start-story', async (req, res) => {
     
     session.updatedAt = new Date();
 
-    console.log(`📖 Nova história iniciada para usuário ${userId} no modo ${mode}`);
+    console.log(`📖 Nova história iniciada para ${userId} no modo ${mode}`);
 
     res.json({
       success: true,
@@ -150,16 +166,18 @@ app.post('/api/start-story', async (req, res) => {
     });
     
   } catch (error) {
-    console.error('💥 Erro ao iniciar história:', error);
+    console.error('💥 Erro em /api/start-story:', error);
     res.status(500).json({
       success: false,
-      error: 'Erro ao iniciar história'
+      error: 'Erro ao iniciar história: ' + error.message
     });
   }
 });
 
-// Rota para continuar a história
+// ✅ ROTA: CONTINUAR HISTÓRIA
 app.post('/api/continue-story', async (req, res) => {
+  console.log('📝 Continuando história:', req.body);
+  
   try {
     const { userId, userMessage } = req.body;
     
@@ -178,17 +196,18 @@ app.post('/api/continue-story', async (req, res) => {
       });
     }
 
-    // Adicionar mensagem do usuário ao histórico
+    // Adicionar mensagem do usuário
     session.messages.push({
       role: "user",
       content: userMessage,
       timestamp: new Date()
     });
 
-    // Gerar resposta da IA baseada em TODO o histórico
+    // Gerar resposta da IA
+    console.log('🤖 Gerando resposta da IA...');
     const aiResponse = await generateAIResponse(session.messages);
     
-    // Adicionar resposta da IA ao histórico
+    // Adicionar resposta da IA
     session.messages.push({
       role: "assistant",
       content: aiResponse,
@@ -197,8 +216,6 @@ app.post('/api/continue-story', async (req, res) => {
     
     session.updatedAt = new Date();
 
-    console.log(`📝 História continuada para usuário ${userId}`);
-
     res.json({
       success: true,
       message: aiResponse,
@@ -206,17 +223,19 @@ app.post('/api/continue-story', async (req, res) => {
     });
     
   } catch (error) {
-    console.error('💥 Erro ao continuar história:', error);
+    console.error('💥 Erro em /api/continue-story:', error);
     res.status(500).json({
       success: false,
-      error: 'Erro ao continuar história'
+      error: 'Erro ao continuar história: ' + error.message
     });
   }
 });
 
-// Rota para obter histórico da sessão
+// ✅ ROTA: OBTER HISTÓRICO
 app.get('/api/session/:userId', (req, res) => {
   const { userId } = req.params;
+  console.log('📋 Obtendo histórico para:', userId);
+  
   const session = userSessions.get(userId);
   
   if (!session) {
@@ -234,48 +253,53 @@ app.get('/api/session/:userId', (req, res) => {
   });
 });
 
-// Função para gerar resposta da IA
+// ✅ FUNÇÃO AUXILIAR: GERAR RESPOSTA DA IA
 async function generateAIResponse(messages) {
   try {
-    // Preparar mensagens para a API (limitar para não exceder tokens)
-    const apiMessages = messages.slice(-10); // Manter últimas 10 mensagens para contexto
+    const apiMessages = messages.slice(-8); // Manter contexto recente
     
     const response = await axios.post('https://api.mistral.ai/v1/chat/completions', {
       model: "mistral-small-latest",
       messages: apiMessages,
-      max_tokens: 800,
-      temperature: 0.8,
-      top_p: 0.9
+      max_tokens: 600,
+      temperature: 0.7
     }, {
       headers: {
         'Authorization': `Bearer ${process.env.MISTRAL_API_KEY}`,
         'Content-Type': 'application/json'
       },
-      timeout: 30000
+      timeout: 25000
     });
 
     return response.data.choices[0].message.content;
   } catch (error) {
-    console.error('❌ Erro na Mistral API:', error.response?.data || error.message);
+    console.error('❌ Erro Mistral API:', error.response?.data || error.message);
     throw new Error('Falha ao gerar resposta da IA');
   }
 }
 
-// Rota para listar modos disponíveis
-app.get('/api/modes', (req, res) => {
-  const modes = Object.entries(GAME_MODES).map(([key, value]) => ({
-    id: key,
-    name: value.name,
-    description: value.systemPrompt.substring(0, 100) + '...'
-  }));
-  
-  res.json({
-    success: true,
-    modes
+// ✅ ROTA CATCH-ALL PARA DEBUG
+app.all('*', (req, res) => {
+  console.log('❌ Rota não encontrada:', req.method, req.url);
+  res.status(404).json({
+    success: false,
+    error: 'Rota não encontrada',
+    method: req.method,
+    url: req.url,
+    availableRoutes: [
+      'GET /health',
+      'GET /api/modes', 
+      'POST /api/start-story',
+      'POST /api/continue-story',
+      'GET /api/session/:userId'
+    ]
   });
 });
 
+// ✅ INICIAR SERVIDOR
 app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
+  console.log(`\n🚀 SERVIDOR INICIADO NA PORTA ${PORT}`);
   console.log(`📚 Modos disponíveis: ${Object.keys(GAME_MODES).join(', ')}`);
+  console.log(`🔑 Mistral API: ${process.env.MISTRAL_API_KEY ? '✅ Configurada' : '❌ FALTANDO'}`);
+  console.log(`🌐 Health Check: http://localhost:${PORT}/health\n`);
 });
