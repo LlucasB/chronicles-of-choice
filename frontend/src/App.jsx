@@ -36,10 +36,24 @@ const app = initializeApp(firebaseConfig)
 const auth = getAuth(app)
 const db = getFirestore(app)
 
+// Sistema de fontes para o chat
+const CHAT_FONTS = {
+  default: { name: 'Padrão', family: 'Inter, sans-serif' },
+  serif: { name: 'Elegante', family: 'Georgia, serif' },
+  monospace: { name: 'Code', family: 'Monaco, monospace' },
+  comic: { name: 'Divertida', family: 'Comic Sans MS, cursive' },
+  fantasy: { name: 'Fantasia', family: 'Papyrus, fantasy' }
+}
+
 function App() {
   const [user, setUser] = useState(null)
   const [currentMode, setCurrentMode] = useState('adventure')
+  const [selectedGenres, setSelectedGenres] = useState(['fantasy'])
+  const [title, setTitle] = useState('')
   const [context, setContext] = useState('')
+  const [characters, setCharacters] = useState([])
+  const [newCharacter, setNewCharacter] = useState('')
+  const [isAdult, setIsAdult] = useState(false)
   const [messages, setMessages] = useState([])
   const [userInput, setUserInput] = useState('')
   const [loading, setLoading] = useState(false)
@@ -49,7 +63,10 @@ function App() {
   const [showUserMenu, setShowUserMenu] = useState(false)
   const [currentStoryId, setCurrentStoryId] = useState(null)
   const [savedStories, setSavedStories] = useState([])
-  const [activeView, setActiveView] = useState('new') // 'new', 'chat', 'history'
+  const [activeView, setActiveView] = useState('new')
+  const [firebaseError, setFirebaseError] = useState(null)
+  const [selectedFont, setSelectedFont] = useState('default')
+  const [showCharacterModal, setShowCharacterModal] = useState(false)
 
   const messagesEndRef = useRef(null)
   const appRef = useRef(null)
@@ -59,7 +76,6 @@ function App() {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (user) {
         setUser(user)
-        // Load user's saved stories
         loadSavedStories(user.uid)
       } else {
         setUser(null)
@@ -98,7 +114,7 @@ function App() {
       await signInWithPopup(auth, provider)
     } catch (error) {
       console.error('Error signing in:', error)
-      alert('Erro ao fazer login: ' + error.message)
+      setFirebaseError('Erro ao fazer login: ' + error.message)
     }
   }
 
@@ -110,6 +126,7 @@ function App() {
       resetAppState()
     } catch (error) {
       console.error('Error signing out:', error)
+      setFirebaseError('Erro ao fazer logout: ' + error.message)
     }
   }
 
@@ -129,6 +146,7 @@ function App() {
       return docRef.id
     } catch (error) {
       console.error('Error saving story:', error)
+      setFirebaseError('Erro ao salvar história: ' + error.message)
       return null
     }
   }
@@ -145,6 +163,41 @@ function App() {
       })
     } catch (error) {
       console.error('Error updating story:', error)
+      setFirebaseError('Erro ao atualizar história: ' + error.message)
+    }
+  }
+
+  // Character management
+  const addCharacter = () => {
+    if (newCharacter.trim() && !characters.includes(newCharacter.trim())) {
+      setCharacters([...characters, {
+        name: newCharacter.trim(),
+        description: '',
+        traits: []
+      }])
+      setNewCharacter('')
+    }
+  }
+
+  const removeCharacter = (index) => {
+    setCharacters(characters.filter((_, i) => i !== index))
+  }
+
+  const updateCharacter = (index, field, value) => {
+    const updatedCharacters = [...characters]
+    updatedCharacters[index] = {
+      ...updatedCharacters[index],
+      [field]: value
+    }
+    setCharacters(updatedCharacters)
+  }
+
+  // Genre management
+  const toggleGenre = (genre) => {
+    if (selectedGenres.includes(genre)) {
+      setSelectedGenres(selectedGenres.filter(g => g !== genre))
+    } else {
+      setSelectedGenres([...selectedGenres, genre])
     }
   }
 
@@ -159,12 +212,10 @@ function App() {
     }
   }
 
-  // Close fullscreen on ESC
   useEffect(() => {
     const handleFullscreenChange = () => {
       setIsFullscreen(!!document.fullscreenElement)
     }
-
     document.addEventListener('fullscreenchange', handleFullscreenChange)
     return () => document.removeEventListener('fullscreenchange', handleFullscreenChange)
   }, [])
@@ -196,8 +247,8 @@ function App() {
   }
 
   const startStory = async () => {
-    if (!context.trim()) {
-      alert('Por favor, escreva um contexto para sua história!')
+    if (!context.trim() || !title.trim()) {
+      alert('Por favor, preencha o título e contexto da história!')
       return
     }
 
@@ -212,8 +263,12 @@ function App() {
         },
         body: JSON.stringify({ 
           userId: user?.uid || 'guest',
+          title: title.trim(),
           context: context.trim(),
-          mode: currentMode
+          mode: currentMode,
+          genres: selectedGenres,
+          characters: characters,
+          isAdult: isAdult
         })
       })
       
@@ -225,12 +280,14 @@ function App() {
         setStoryStarted(true)
         setActiveView('chat')
 
-        // Save to Firestore if user is logged in
         if (user) {
           const storyId = await saveStoryToFirestore({
-            title: context.substring(0, 50) + (context.length > 50 ? '...' : ''),
+            title: title.trim(),
             context: context.trim(),
             mode: currentMode,
+            genres: selectedGenres,
+            characters: characters,
+            isAdult: isAdult,
             messages: initialMessages,
             modeName: availableModes.find(m => m.id === currentMode)?.name || 'Aventura'
           })
@@ -282,7 +339,6 @@ function App() {
         const finalMessages = data.history || updatedMessages
         setMessages(finalMessages)
 
-        // Update story in Firestore
         if (user && currentStoryId) {
           await updateStoryInFirestore(currentStoryId, {
             messages: finalMessages,
@@ -315,31 +371,40 @@ function App() {
   const resetStory = () => {
     setStoryStarted(false)
     setMessages([])
+    setTitle('')
     setContext('')
+    setCharacters([])
     setUserInput('')
     setCurrentStoryId(null)
     setActiveView('new')
+    setSelectedGenres(['fantasy'])
+    setIsAdult(false)
   }
 
   const loadStory = (story) => {
     setMessages(story.messages || [])
     setCurrentMode(story.mode || 'adventure')
+    setTitle(story.title || '')
     setContext(story.context || '')
+    setCharacters(story.characters || [])
+    setSelectedGenres(story.genres || ['fantasy'])
+    setIsAdult(story.isAdult || false)
     setCurrentStoryId(story.id)
     setStoryStarted(true)
     setActiveView('chat')
   }
 
   const exportStory = () => {
-    const storyText = messages.map(msg => 
-      `${msg.role === 'user' ? '👤 Você' : '📖 Narrador'}: ${msg.content}`
-    ).join('\n\n')
+    const storyText = `Título: ${title}\n\n` +
+      messages.map(msg => 
+        `${msg.role === 'user' ? '👤 Você' : '📖 Narrador'}: ${msg.content}`
+      ).join('\n\n')
     
     const blob = new Blob([storyText], { type: 'text/plain' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `historia-${new Date().toISOString().split('T')[0]}.txt`
+    a.download = `${title || 'historia'}-${new Date().toISOString().split('T')[0]}.txt`
     document.body.appendChild(a)
     a.click()
     document.body.removeChild(a)
@@ -351,10 +416,14 @@ function App() {
   const resetAppState = () => {
     setStoryStarted(false)
     setMessages([])
+    setTitle('')
     setContext('')
+    setCharacters([])
     setUserInput('')
     setCurrentStoryId(null)
     setActiveView('new')
+    setSelectedGenres(['fantasy'])
+    setIsAdult(false)
   }
 
   const formatDate = (timestamp) => {
@@ -366,6 +435,18 @@ function App() {
     })
   }
 
+  // Available genres
+  const availableGenres = [
+    { id: 'fantasy', name: '🧙‍♂️ Fantasia', icon: '🧙‍♂️' },
+    { id: 'sci-fi', name: '🚀 Ficção Científica', icon: '🚀' },
+    { id: 'romance', name: '💖 Romance', icon: '💖' },
+    { id: 'mystery', name: '🕵️‍♂️ Mistério', icon: '🕵️‍♂️' },
+    { id: 'horror', name: '👻 Horror', icon: '👻' },
+    { id: 'adventure', name: '⚔️ Aventura', icon: '⚔️' },
+    { id: 'comedy', name: '🎭 Comédia', icon: '🎭' },
+    { id: 'drama', name: '🎬 Drama', icon: '🎬' }
+  ]
+
   // Loading screen if not authenticated
   if (!user) {
     return (
@@ -374,35 +455,55 @@ function App() {
           <div className="auth-header">
             <div className="logo">📖</div>
             <h1>Chronicles of Choice</h1>
-            <p>Crie e salve histórias épicas com IA</p>
+            <p>Crie histórias épicas com personagens customizados</p>
           </div>
+          
+          {firebaseError && (
+            <div className="error-banner">
+              <strong>⚠️ Aviso:</strong> {firebaseError}
+              <br />
+              <small>Você pode continuar como convidado</small>
+            </div>
+          )}
           
           <div className="auth-features">
             <div className="feature">
               <span className="feature-icon">🎮</span>
-              <h3>Modos Diversos</h3>
-              <p>Aventura, Romance, Horror e mais</p>
+              <h3>Multiplos Gêneros</h3>
+              <p>Combine fantasia, sci-fi, romance e mais</p>
             </div>
             <div className="feature">
-              <span className="feature-icon">💾</span>
-              <h3>Salve Automaticamente</h3>
-              <p>Suas histórias são salvas na nuvem</p>
+              <span className="feature-icon">👥</span>
+              <h3>Personagens Customizados</h3>
+              <p>Crie e gerencie seu próprio elenco</p>
             </div>
             <div className="feature">
-              <span className="feature-icon">🚀</span>
-              <h3>IA Avançada</h3>
-              <p>Narrativas inteligentes e coerentes</p>
+              <span className="feature-icon">🎨</span>
+              <h3>Chat Personalizado</h3>
+              <p>Múltiplas fontes e temas</p>
             </div>
           </div>
 
-          <button className="google-signin-btn" onClick={signInWithGoogle}>
-            <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" />
-            Entrar com Google
-          </button>
+          {!firebaseError ? (
+            <button className="google-signin-btn" onClick={signInWithGoogle}>
+              <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" />
+              Entrar com Google
+            </button>
+          ) : (
+            <button 
+              className="guest-mode-btn"
+              onClick={() => setUser({ displayName: 'Convidado', email: 'convidado@exemplo.com' })}
+            >
+              🎮 Continuar como Convidado
+            </button>
+          )}
 
           <div className="auth-footer">
             <p>
-              <strong>💡 Importante:</strong> Você precisa fazer login para salvar suas histórias
+              {firebaseError 
+                ? '🔧 Use o modo convidado para testar'
+                : '💡 Faça login para salvar suas histórias'
+              }
             </p>
           </div>
         </div>
@@ -412,6 +513,78 @@ function App() {
 
   return (
     <div className={`app ${isFullscreen ? 'fullscreen' : ''}`} ref={appRef}>
+      {/* Firebase Error Banner */}
+      {firebaseError && (
+        <div className="firebase-error-banner">
+          <span>⚠️ {firebaseError}</span>
+          <button onClick={() => setFirebaseError(null)}>✕</button>
+        </div>
+      )}
+
+      {/* Character Modal */}
+      {showCharacterModal && (
+        <div className="modal-overlay">
+          <div className="modal-content">
+            <div className="modal-header">
+              <h3>👥 Gerenciar Personagens</h3>
+              <button onClick={() => setShowCharacterModal(false)}>✕</button>
+            </div>
+            <div className="characters-management">
+              <div className="add-character-form">
+                <input
+                  type="text"
+                  value={newCharacter}
+                  onChange={(e) => setNewCharacter(e.target.value)}
+                  onKeyPress={(e) => e.key === 'Enter' && addCharacter()}
+                  placeholder="Nome do personagem..."
+                  className="character-name-input"
+                />
+                <button onClick={addCharacter} className="add-character-btn">
+                  ➕ Adicionar
+                </button>
+              </div>
+              
+              <div className="characters-list">
+                {characters.map((character, index) => (
+                  <div key={index} className="character-card">
+                    <div className="character-header">
+                      <input
+                        type="text"
+                        value={character.name}
+                        onChange={(e) => updateCharacter(index, 'name', e.target.value)}
+                        placeholder="Nome do personagem"
+                        className="character-name"
+                      />
+                      <button 
+                        onClick={() => removeCharacter(index)}
+                        className="remove-character-btn"
+                      >
+                        🗑️
+                      </button>
+                    </div>
+                    <textarea
+                      value={character.description}
+                      onChange={(e) => updateCharacter(index, 'description', e.target.value)}
+                      placeholder="Descrição do personagem..."
+                      rows="3"
+                      className="character-description"
+                    />
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="modal-actions">
+              <button 
+                onClick={() => setShowCharacterModal(false)}
+                className="modal-confirm-btn"
+              >
+                ✅ Concluído
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <header className="app-header">
         <div className="header-left">
@@ -437,9 +610,25 @@ function App() {
           </div>
 
           {activeView === 'chat' && (
-            <button className="header-btn" onClick={exportStory} title="Exportar História">
-              💾 Exportar
-            </button>
+            <>
+              {/* Font Selector */}
+              <select 
+                value={selectedFont}
+                onChange={(e) => setSelectedFont(e.target.value)}
+                className="font-selector"
+                title="Escolher fonte do chat"
+              >
+                {Object.entries(CHAT_FONTS).map(([key, font]) => (
+                  <option key={key} value={key}>
+                    {font.name}
+                  </option>
+                ))}
+              </select>
+
+              <button className="header-btn" onClick={exportStory} title="Exportar História">
+                💾 Exportar
+              </button>
+            </>
           )}
           
           <button 
@@ -487,66 +676,153 @@ function App() {
           <div className="start-screen">
             <div className="welcome-section">
               <h2>Olá, {user.displayName}! 👋</h2>
-              <p>Pronto para criar uma nova história épica?</p>
+              <p>Crie sua próxima grande aventura</p>
             </div>
 
             <div className="setup-panel">
-              {/* Mode Selection */}
-              <section className="mode-section">
-                <h3>🎮 Escolha o Modo</h3>
-                <div className="mode-grid">
-                  {availableModes.map(mode => (
-                    <div
-                      key={mode.id}
-                      className={`mode-card ${currentMode === mode.id ? 'selected' : ''}`}
-                      onClick={() => setCurrentMode(mode.id)}
-                    >
-                      <div className="mode-icon">
-                        {mode.id === 'adventure' && '⚔️'}
-                        {mode.id === 'romance' && '💖'}
-                        {mode.id === 'horror' && '👻'}
-                        {mode.id === 'fantasy' && '🐉'}
-                      </div>
-                      <h4>{mode.name}</h4>
-                      <p>{mode.description}</p>
+              <div className="setup-columns">
+                {/* Left Column - Basic Info */}
+                <div className="setup-column">
+                  {/* Title Input */}
+                  <section className="title-section">
+                    <h3>✏️ Título da História</h3>
+                    <input
+                      type="text"
+                      value={title}
+                      onChange={(e) => setTitle(e.target.value)}
+                      placeholder="Dê um título épico para sua história..."
+                      className="title-input"
+                    />
+                  </section>
+
+                  {/* Mode Selection */}
+                  <section className="mode-section">
+                    <h3>🎮 Modo Principal</h3>
+                    <div className="mode-grid">
+                      {availableModes.map(mode => (
+                        <div
+                          key={mode.id}
+                          className={`mode-card ${currentMode === mode.id ? 'selected' : ''}`}
+                          onClick={() => setCurrentMode(mode.id)}
+                        >
+                          <div className="mode-icon">
+                            {mode.id === 'adventure' && '⚔️'}
+                            {mode.id === 'romance' && '💖'}
+                            {mode.id === 'horror' && '👻'}
+                            {mode.id === 'fantasy' && '🐉'}
+                          </div>
+                          <h4>{mode.name}</h4>
+                          <p>{mode.description}</p>
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
-              </section>
+                  </section>
 
-              {/* Context Input */}
-              <section className="context-section">
-                <h3>✨ Contexto da História</h3>
-                <div className="context-input-wrapper">
-                  <textarea
-                    value={context}
-                    onChange={(e) => setContext(e.target.value)}
-                    placeholder={`Exemplo: "Sou um cavaleiro em busca do dragão lendário que aterroriza o reino. Minha espada está afiada e meu coração cheio de coragem."
-
-Seja criativo! Descreva seu personagem, mundo ou situação inicial.`}
-                    rows="5"
-                    className="context-textarea"
-                  />
-                  <div className="textarea-footer">
-                    <span>{context.length}/1000 caracteres</span>
-                  </div>
+                  {/* Adult Content Toggle */}
+                  <section className="adult-section">
+                    <label className="adult-toggle">
+                      <input
+                        type="checkbox"
+                        checked={isAdult}
+                        onChange={(e) => setIsAdult(e.target.checked)}
+                      />
+                      <span className="toggle-slider"></span>
+                      <span className="toggle-label">Conteúdo +18</span>
+                    </label>
+                    <p className="adult-hint">
+                      {isAdult 
+                        ? '⚠️ A história poderá conter temas adultos'
+                        : 'Conteúdo adequado para todas as idades'
+                      }
+                    </p>
+                  </section>
                 </div>
-              </section>
+
+                {/* Right Column - Advanced Settings */}
+                <div className="setup-column">
+                  {/* Genre Selection */}
+                  <section className="genres-section">
+                    <h3>🎭 Gêneros da História</h3>
+                    <div className="genres-grid">
+                      {availableGenres.map(genre => (
+                        <button
+                          key={genre.id}
+                          className={`genre-btn ${selectedGenres.includes(genre.id) ? 'selected' : ''}`}
+                          onClick={() => toggleGenre(genre.id)}
+                        >
+                          <span className="genre-icon">{genre.icon}</span>
+                          {genre.name}
+                        </button>
+                      ))}
+                    </div>
+                  </section>
+
+                  {/* Characters Section */}
+                  <section className="characters-section">
+                    <div className="characters-header">
+                      <h3>👥 Personagens</h3>
+                      <button 
+                        onClick={() => setShowCharacterModal(true)}
+                        className="manage-characters-btn"
+                      >
+                        Gerenciar
+                      </button>
+                    </div>
+                    <div className="characters-preview">
+                      {characters.length === 0 ? (
+                        <p className="no-characters">Nenhum personagem adicionado</p>
+                      ) : (
+                        <div className="characters-tags">
+                          {characters.slice(0, 3).map((character, index) => (
+                            <span key={index} className="character-tag">
+                              {character.name}
+                            </span>
+                          ))}
+                          {characters.length > 3 && (
+                            <span className="character-tag-more">
+                              +{characters.length - 3} mais
+                            </span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </section>
+
+                  {/* Context Input */}
+                  <section className="context-section">
+                    <h3>✨ Contexto da História</h3>
+                    <div className="context-input-wrapper">
+                      <textarea
+                        value={context}
+                        onChange={(e) => setContext(e.target.value)}
+                        placeholder={`Descreva o mundo, situação inicial ou background da história...
+
+Exemplo: "Em um reino onde a magia é proibida, um jovem aprendiz descobre que possui poderes ancestrais. Enquanto isso, uma guerra se aproxima das fronteiras..."`}
+                        rows="6"
+                        className="context-textarea"
+                      />
+                      <div className="textarea-footer">
+                        <span>{context.length}/2000 caracteres</span>
+                      </div>
+                    </div>
+                  </section>
+                </div>
+              </div>
 
               {/* Action Button */}
               <div className="action-section">
                 <button
                   onClick={startStory}
-                  disabled={loading || !context.trim()}
+                  disabled={loading || !context.trim() || !title.trim()}
                   className="start-button"
                 >
                   {loading ? (
                     <>
                       <div className="spinner"></div>
-                      Iniciando...
+                      Criando Mundo...
                     </>
                   ) : (
-                    '🚀 Começar Jornada'
+                    '🚀 Iniciar Aventura Épica'
                   )}
                 </button>
               </div>
@@ -559,14 +835,14 @@ Seja criativo! Descreva seu personagem, mundo ou situação inicial.`}
           <div className="history-screen">
             <div className="history-header">
               <h2>📚 Minhas Histórias</h2>
-              <p>Continue de onde parou ou relembre aventuras passadas</p>
+              <p>Continue suas aventuras ou relembre grandes jornadas</p>
             </div>
 
             {savedStories.length === 0 ? (
               <div className="empty-history">
                 <div className="empty-icon">📖</div>
-                <h3>Nenhuma história salva ainda</h3>
-                <p>Crie sua primeira história para vê-la aqui!</p>
+                <h3>Nenhuma história encontrada</h3>
+                <p>Suas grandes aventuras aparecerão aqui</p>
                 <button 
                   className="new-story-btn"
                   onClick={() => setActiveView('new')}
@@ -584,24 +860,29 @@ Seja criativo! Descreva seu personagem, mundo ou situação inicial.`}
                   >
                     <div className="story-header">
                       <h3>{story.title || 'História Sem Título'}</h3>
-                      <span className="story-mode">{story.modeName}</span>
+                      <div className="story-tags">
+                        <span className="story-mode">{story.modeName}</span>
+                        {story.isAdult && <span className="adult-tag">+18</span>}
+                      </div>
                     </div>
                     <div className="story-context">
-                      {story.context.substring(0, 150)}
-                      {story.context.length > 150 ? '...' : ''}
+                      {story.context.substring(0, 120)}
+                      {story.context.length > 120 ? '...' : ''}
                     </div>
                     <div className="story-meta">
+                      <div className="story-genres">
+                        {story.genres?.slice(0, 2).map(genre => (
+                          <span key={genre} className="genre-tag">
+                            {availableGenres.find(g => g.id === genre)?.icon}
+                          </span>
+                        ))}
+                      </div>
                       <span className="message-count">
                         {story.messages?.length || 0} mensagens
                       </span>
-                      <span className="story-date">
-                        {formatDate(story.updatedAt)}
-                      </span>
                     </div>
-                    <div className="story-actions">
-                      <button className="action-btn">
-                        Continuar →
-                      </button>
+                    <div className="story-date">
+                      {formatDate(story.updatedAt)}
                     </div>
                   </div>
                 ))}
@@ -612,16 +893,20 @@ Seja criativo! Descreva seu personagem, mundo ou situação inicial.`}
 
         {/* Chat View */}
         {activeView === 'chat' && (
-          <div className="chat-interface">
+          <div className="chat-interface" style={{ fontFamily: CHAT_FONTS[selectedFont].family }}>
             <div className="chat-header">
               <div className="chat-info">
-                <span className="mode-tag">
-                  {availableModes.find(m => m.id === currentMode)?.name}
-                </span>
-                <span className="message-count">{messages.length} mensagens</span>
-                {currentStoryId && (
-                  <span className="saved-badge">💾 Salvo</span>
-                )}
+                <div className="story-title">{title}</div>
+                <div className="chat-tags">
+                  <span className="mode-tag">
+                    {availableModes.find(m => m.id === currentMode)?.name}
+                  </span>
+                  {isAdult && <span className="adult-tag">+18</span>}
+                  <span className="message-count">{messages.length} mensagens</span>
+                  {currentStoryId && (
+                    <span className="saved-badge">💾 Salvo</span>
+                  )}
+                </div>
               </div>
               <div className="chat-actions">
                 <button className="header-btn" onClick={() => setActiveView('history')}>
@@ -639,7 +924,7 @@ Seja criativo! Descreva seu personagem, mundo ou situação inicial.`}
                 <div className="empty-chat">
                   <div className="empty-icon">💬</div>
                   <h3>Sua aventura começa aqui</h3>
-                  <p>Envie sua primeira mensagem para iniciar a história</p>
+                  <p>Escreva sua primeira mensagem para dar vida à história</p>
                 </div>
               ) : (
                 messages.map((message, index) => (
@@ -652,7 +937,9 @@ Seja criativo! Descreva seu personagem, mundo ou situação inicial.`}
                     </div>
                     <div className="message-content">
                       <div className="message-bubble">
-                        <p>{message.content}</p>
+                        <div className="message-text">
+                          {message.content}
+                        </div>
                         <span className="message-time">
                           {message.timestamp ? formatDate(message.timestamp) : 'Agora'}
                         </span>
@@ -687,10 +974,11 @@ Seja criativo! Descreva seu personagem, mundo ou situação inicial.`}
                   value={userInput}
                   onChange={(e) => setUserInput(e.target.value)}
                   onKeyPress={handleKeyPress}
-                  placeholder="Descreva sua ação ou fale com os personagens..."
-                  rows="2"
+                  placeholder="Descreva sua ação, fale com personagens ou tome decisões importantes..."
+                  rows="3"
                   disabled={loading}
                   className="message-input"
+                  style={{ fontFamily: CHAT_FONTS[selectedFont].family }}
                 />
                 <button
                   onClick={sendMessage}
@@ -702,7 +990,7 @@ Seja criativo! Descreva seu personagem, mundo ou situação inicial.`}
               </div>
               <div className="input-hint">
                 Pressione Enter para enviar • Shift+Enter para nova linha
-                {currentStoryId && ' • História sendo salva automaticamente'}
+                {currentStoryId && ' • Salvamento automático ativo'}
               </div>
             </div>
           </div>
