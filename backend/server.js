@@ -7,7 +7,7 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// ✅✅✅ CORS CORRIGIDO - Configuração PERMISSIVA para desenvolvimento
+// CORS
 app.use(cors({
   origin: [
     'https://chronicles-of-choice.vercel.app',
@@ -22,13 +22,11 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
 }));
 
-// ✅ Middleware para headers CORS manuais (backup)
 app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
   res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
   
-  // ✅ Responde imediatamente para requisições OPTIONS (preflight)
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
   }
@@ -38,43 +36,39 @@ app.use((req, res, next) => {
 
 app.use(express.json());
 
-// Armazenamento em memória
 const userSessions = new Map();
 
-// ✅ Health check
+// Sistemas de Modos
+const GAME_MODES = {
+  adventure: {
+    name: "🎮 Modo Aventura",
+    systemPrompt: `Você é um mestre de RPG especializado em aventuras épicas. Crie narrativas emocionantes com missões, combates, exploração e NPCs. Mantenha a história coerente.`
+  },
+  romance: {
+    name: "💖 Modo Romance", 
+    systemPrompt: `Você é um escritor especializado em romances interativos. Crie relacionamentos profundos e diálogos emocionantes.`
+  },
+  horror: {
+    name: "👻 Modo Horror",
+    systemPrompt: `Você é um mestre do horror e suspense. Crie atmosfera tensa e sustos psicológicos.`
+  },
+  fantasy: {
+    name: "🐉 Modo Fantasia Épica",
+    systemPrompt: `Você é um contador de histórias de fantasia. Crie mundos mágicos, criaturas e batalhas épicas.`
+  }
+};
+
+// Health check
 app.get('/health', (req, res) => {
-  console.log('✅ Health check - CORS funcionando!');
   res.json({ 
     status: 'OK', 
-    message: 'Chronicles Backend Running - CORS Fixed',
+    message: 'Chronicles Backend Running',
     timestamp: new Date().toISOString()
   });
 });
 
-// ✅ Sistemas de Modos
-const GAME_MODES = {
-  adventure: {
-    name: "🎮 Modo Aventura",
-    systemPrompt: `Você é um mestre de RPG especializado em aventuras épicas.`
-  },
-  romance: {
-    name: "💖 Modo Romance", 
-    systemPrompt: `Você é um escritor especializado em romances interativos.`
-  },
-  horror: {
-    name: "👻 Modo Horror",
-    systemPrompt: `Você é um mestre do horror e suspense.`
-  },
-  fantasy: {
-    name: "🐉 Modo Fantasia Épica",
-    systemPrompt: `Você é um contador de histórias de fantasia.`
-  }
-};
-
-// ✅ ROTA: LISTAR MODOS
+// Rota: Listar modos
 app.get('/api/modes', (req, res) => {
-  console.log('📚 /api/modes chamada - CORS OK');
-  
   try {
     const modes = Object.entries(GAME_MODES).map(([key, value]) => ({
       id: key,
@@ -95,9 +89,9 @@ app.get('/api/modes', (req, res) => {
   }
 });
 
-// ✅ ROTA: INICIAR HISTÓRIA
+// Rota: Iniciar história
 app.post('/api/start-story', async (req, res) => {
-  console.log('🎯 /api/start-story chamada - CORS OK');
+  console.log('🎯 INICIANDO HISTÓRIA:', req.body);
   
   try {
     const { userId, context, mode = 'adventure' } = req.body;
@@ -119,7 +113,7 @@ app.post('/api/start-story', async (req, res) => {
       messages: [
         {
           role: "system",
-          content: `${selectedMode.systemPrompt}\n\nCONTEXTO: ${context}`
+          content: `${selectedMode.systemPrompt}\n\nContexto inicial: ${context}`
         }
       ],
       createdAt: new Date()
@@ -128,6 +122,7 @@ app.post('/api/start-story', async (req, res) => {
     userSessions.set(userId, session);
     
     // Gerar resposta IA
+    console.log('🤖 CHAMANDO MISTRAL API...');
     const aiResponse = await generateAIResponse(session.messages);
     
     session.messages.push({
@@ -136,6 +131,8 @@ app.post('/api/start-story', async (req, res) => {
       timestamp: new Date()
     });
 
+    console.log('✅ HISTÓRIA INICIADA COM SUCESSO');
+    
     res.json({
       success: true,
       message: aiResponse,
@@ -144,17 +141,17 @@ app.post('/api/start-story', async (req, res) => {
     });
     
   } catch (error) {
-    console.error('💥 Erro em /api/start-story:', error);
+    console.error('💥 ERRO EM /api/start-story:', error);
     res.status(500).json({
       success: false,
-      error: 'Erro ao iniciar história'
+      error: 'Erro ao iniciar história: ' + error.message
     });
   }
 });
 
-// ✅ ROTA: CONTINUAR HISTÓRIA
+// Rota: Continuar história
 app.post('/api/continue-story', async (req, res) => {
-  console.log('📝 /api/continue-story chamada - CORS OK');
+  console.log('📝 CONTINUANDO HISTÓRIA:', req.body);
   
   try {
     const { userId, userMessage } = req.body;
@@ -174,6 +171,8 @@ app.post('/api/continue-story', async (req, res) => {
       });
     }
 
+    console.log('💬 MENSAGEM DO USUÁRIO:', userMessage);
+    
     // Adicionar mensagem usuário
     session.messages.push({
       role: "user",
@@ -182,6 +181,7 @@ app.post('/api/continue-story', async (req, res) => {
     });
 
     // Gerar resposta IA
+    console.log('🤖 CHAMANDO MISTRAL API PARA CONTINUAR...');
     const aiResponse = await generateAIResponse(session.messages);
     
     session.messages.push({
@@ -190,6 +190,8 @@ app.post('/api/continue-story', async (req, res) => {
       timestamp: new Date()
     });
 
+    console.log('✅ HISTÓRIA CONTINUADA COM SUCESSO');
+    
     res.json({
       success: true,
       message: aiResponse,
@@ -197,18 +199,28 @@ app.post('/api/continue-story', async (req, res) => {
     });
     
   } catch (error) {
-    console.error('💥 Erro em /api/continue-story:', error);
+    console.error('💥 ERRO EM /api/continue-story:', error);
     res.status(500).json({
       success: false,
-      error: 'Erro ao continuar história'
+      error: 'Erro ao continuar história: ' + error.message
     });
   }
 });
 
-// ✅ FUNÇÃO IA
+// ✅✅✅ FUNÇÃO IA COM LOGS DETALHADOS
 async function generateAIResponse(messages) {
+  console.log('🔍 DETALHES DA CHAMADA DA IA:');
+  console.log('📋 Quantidade de mensagens:', messages.length);
+  console.log('📝 Últimas mensagens:', JSON.stringify(messages.slice(-2), null, 2));
+  
   try {
-    const apiMessages = messages.slice(-6);
+    // Preparar mensagens para a API
+    const apiMessages = messages.map(msg => ({
+      role: msg.role,
+      content: msg.content
+    }));
+
+    console.log('🚀 ENVIANDO PARA MISTRAL API...');
     
     const response = await axios.post('https://api.mistral.ai/v1/chat/completions', {
       model: "mistral-small-latest",
@@ -220,30 +232,65 @@ async function generateAIResponse(messages) {
         'Authorization': `Bearer ${process.env.MISTRAL_API_KEY}`,
         'Content-Type': 'application/json'
       },
-      timeout: 25000
+      timeout: 30000
     });
 
+    console.log('✅ RESPOSTA DA MISTRAL RECEBIDA:');
+    console.log('📊 Status:', response.status);
+    console.log('🔤 Conteúdo:', response.data.choices[0].message.content.substring(0, 100) + '...');
+    
     return response.data.choices[0].message.content;
+    
   } catch (error) {
-    console.error('❌ Erro Mistral API:', error.message);
-    return 'Desculpe, houve um erro ao gerar a história. Tente novamente.';
+    console.error('💥 ERRO DETALHADO NA MISTRAL API:');
+    
+    if (error.response) {
+      // Erro com resposta do servidor
+      console.error('📊 Status do erro:', error.response.status);
+      console.error('📝 Dados do erro:', error.response.data);
+      console.error('📋 Headers do erro:', error.response.headers);
+      
+      if (error.response.status === 401) {
+        console.error('🔑 ERRO 401: API KEY INVÁLIDA OU AUSENTE');
+        console.error('🔑 API Key usada:', process.env.MISTRAL_API_KEY ? '***' + process.env.MISTRAL_API_KEY.slice(-4) : 'NÃO CONFIGURADA');
+      } else if (error.response.status === 429) {
+        console.error('⏰ ERRO 429: LIMITE DE REQUISIÇÕES EXCEDIDO');
+      } else if (error.response.status === 400) {
+        console.error('❌ ERRO 400: REQUISIÇÃO INVÁLIDA - Verifique o formato das mensagens');
+      }
+      
+    } else if (error.request) {
+      // Erro sem resposta
+      console.error('🌐 ERRO DE REDE: Não foi possível conectar com a Mistral API');
+      console.error('🔧 Detalhes do request:', error.request);
+    } else {
+      // Outro erro
+      console.error('⚡ ERRO GERAL:', error.message);
+    }
+    
+    throw new Error('Falha ao gerar resposta da IA: ' + error.message);
   }
 }
 
-// ✅ Rota para debug CORS
-app.get('/api/cors-test', (req, res) => {
+// Rota para verificar API Key
+app.get('/api/debug', (req, res) => {
+  const hasApiKey = !!process.env.MISTRAL_API_KEY;
+  const apiKeyPreview = hasApiKey ? 
+    `***${process.env.MISTRAL_API_KEY.slice(-4)}` : 
+    'NÃO CONFIGURADA';
+  
   res.json({
-    success: true,
-    message: 'CORS está funcionando!',
-    timestamp: new Date().toISOString(),
-    allowedOrigins: [
-      'https://chronicles-of-choice.vercel.app',
-      'https://chronicles-frontend.vercel.app'
-    ]
+    mistral_api_key_configured: hasApiKey,
+    mistral_api_key_preview: apiKeyPreview,
+    user_sessions_count: userSessions.size,
+    timestamp: new Date().toISOString()
   });
 });
 
 app.listen(PORT, () => {
   console.log(`🚀 Servidor rodando na porta ${PORT}`);
-  console.log(`✅ CORS configurado para Vercel e Render`);
+  console.log(`🔑 Mistral API Key: ${process.env.MISTRAL_API_KEY ? 'CONFIGURADA' : 'NÃO CONFIGURADA'}`);
+  if (process.env.MISTRAL_API_KEY) {
+    console.log(`🔐 Preview: ***${process.env.MISTRAL_API_KEY.slice(-4)}`);
+  }
 });
