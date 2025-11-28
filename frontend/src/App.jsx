@@ -1,9 +1,43 @@
 import { useState, useEffect, useRef } from 'react'
+import { initializeApp } from 'firebase/app'
+import { 
+  getAuth, 
+  signInWithPopup, 
+  GoogleAuthProvider, 
+  signOut, 
+  onAuthStateChanged 
+} from 'firebase/auth'
+import { 
+  getFirestore, 
+  collection, 
+  addDoc, 
+  updateDoc,
+  doc,
+  query, 
+  where, 
+  orderBy, 
+  onSnapshot,
+  serverTimestamp 
+} from 'firebase/firestore'
 import './App.css'
 
+// Firebase config
+const firebaseConfig = {
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID
+}
+
+// Initialize Firebase
+const app = initializeApp(firebaseConfig)
+const auth = getAuth(app)
+const db = getFirestore(app)
+
 function App() {
-  const [user, setUser] = useState({ displayName: 'Jogador', email: 'convidado@exemplo.com' })
-  const [userId] = useState(() => `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`)
+  const [user, setUser] = useState(null)
   const [currentMode, setCurrentMode] = useState('adventure')
   const [context, setContext] = useState('')
   const [messages, setMessages] = useState([])
@@ -13,15 +47,106 @@ function App() {
   const [availableModes, setAvailableModes] = useState([])
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [showUserMenu, setShowUserMenu] = useState(false)
+  const [currentStoryId, setCurrentStoryId] = useState(null)
+  const [savedStories, setSavedStories] = useState([])
+  const [activeView, setActiveView] = useState('new') // 'new', 'chat', 'history'
 
   const messagesEndRef = useRef(null)
   const appRef = useRef(null)
 
-  // Simular login - remover quando adicionar Firebase
+  // Auth state listener
   useEffect(() => {
-    // Usuário convidado por padrão
-    setUser({ displayName: 'Jogador', email: 'convidado@exemplo.com' })
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      if (user) {
+        setUser(user)
+        // Load user's saved stories
+        loadSavedStories(user.uid)
+      } else {
+        setUser(null)
+        setSavedStories([])
+      }
+    })
+    return () => unsubscribe()
   }, [])
+
+  // Load saved stories from Firestore
+  const loadSavedStories = (userId) => {
+    const storiesQuery = query(
+      collection(db, 'stories'),
+      where('userId', '==', userId),
+      orderBy('updatedAt', 'desc')
+    )
+
+    const unsubscribe = onSnapshot(storiesQuery, (snapshot) => {
+      const stories = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      }))
+      setSavedStories(stories)
+    })
+
+    return unsubscribe
+  }
+
+  // Google Sign In
+  const signInWithGoogle = async () => {
+    try {
+      const provider = new GoogleAuthProvider()
+      provider.setCustomParameters({
+        prompt: 'select_account'
+      })
+      await signInWithPopup(auth, provider)
+    } catch (error) {
+      console.error('Error signing in:', error)
+      alert('Erro ao fazer login: ' + error.message)
+    }
+  }
+
+  // Sign Out
+  const handleSignOut = async () => {
+    try {
+      await signOut(auth)
+      setShowUserMenu(false)
+      resetAppState()
+    } catch (error) {
+      console.error('Error signing out:', error)
+    }
+  }
+
+  // Save story to Firestore
+  const saveStoryToFirestore = async (storyData) => {
+    if (!user) return null
+
+    try {
+      const docRef = await addDoc(collection(db, 'stories'), {
+        ...storyData,
+        userId: user.uid,
+        userEmail: user.email,
+        userName: user.displayName,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      })
+      return docRef.id
+    } catch (error) {
+      console.error('Error saving story:', error)
+      return null
+    }
+  }
+
+  // Update story in Firestore
+  const updateStoryInFirestore = async (storyId, updates) => {
+    if (!user) return
+
+    try {
+      const storyRef = doc(db, 'stories', storyId)
+      await updateDoc(storyRef, {
+        ...updates,
+        updatedAt: serverTimestamp()
+      })
+    } catch (error) {
+      console.error('Error updating story:', error)
+    }
+  }
 
   // Fullscreen functionality
   const toggleFullscreen = () => {
@@ -86,7 +211,7 @@ function App() {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({ 
-          userId: userId,
+          userId: user?.uid || 'guest',
           context: context.trim(),
           mode: currentMode
         })
@@ -95,8 +220,22 @@ function App() {
       const data = await response.json()
       
       if (data.success) {
-        setMessages(data.history || [])
+        const initialMessages = data.history || []
+        setMessages(initialMessages)
         setStoryStarted(true)
+        setActiveView('chat')
+
+        // Save to Firestore if user is logged in
+        if (user) {
+          const storyId = await saveStoryToFirestore({
+            title: context.substring(0, 50) + (context.length > 50 ? '...' : ''),
+            context: context.trim(),
+            mode: currentMode,
+            messages: initialMessages,
+            modeName: availableModes.find(m => m.id === currentMode)?.name || 'Aventura'
+          })
+          setCurrentStoryId(storyId)
+        }
       } else {
         alert('Erro ao iniciar história: ' + data.error)
       }
@@ -120,7 +259,8 @@ function App() {
       timestamp: new Date()
     }
     
-    setMessages(prev => [...prev, userMessageObj])
+    const updatedMessages = [...messages, userMessageObj]
+    setMessages(updatedMessages)
 
     try {
       const API_URL = import.meta.env.VITE_API_URL
@@ -131,7 +271,7 @@ function App() {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({ 
-          userId: userId,
+          userId: user?.uid || 'guest',
           userMessage
         })
       })
@@ -139,7 +279,16 @@ function App() {
       const data = await response.json()
       
       if (data.success) {
-        setMessages(data.history || [])
+        const finalMessages = data.history || updatedMessages
+        setMessages(finalMessages)
+
+        // Update story in Firestore
+        if (user && currentStoryId) {
+          await updateStoryInFirestore(currentStoryId, {
+            messages: finalMessages,
+            lastMessage: userMessage.substring(0, 100)
+          })
+        }
       } else {
         alert('Erro ao continuar história: ' + data.error)
         setMessages(prev => prev.filter(msg => msg !== userMessageObj))
@@ -155,9 +304,9 @@ function App() {
   const handleKeyPress = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
-      if (storyStarted) {
+      if (storyStarted && activeView === 'chat') {
         sendMessage()
-      } else {
+      } else if (activeView === 'new') {
         startStory()
       }
     }
@@ -168,6 +317,17 @@ function App() {
     setMessages([])
     setContext('')
     setUserInput('')
+    setCurrentStoryId(null)
+    setActiveView('new')
+  }
+
+  const loadStory = (story) => {
+    setMessages(story.messages || [])
+    setCurrentMode(story.mode || 'adventure')
+    setContext(story.context || '')
+    setCurrentStoryId(story.id)
+    setStoryStarted(true)
+    setActiveView('chat')
   }
 
   const exportStory = () => {
@@ -188,21 +348,66 @@ function App() {
     alert('História exportada com sucesso!')
   }
 
-  // Simular login/logout
-  const handleLogin = () => {
-    setUser({ 
-      displayName: 'Jogador Conectado', 
-      email: 'usuario@exemplo.com' 
-    })
-    setShowUserMenu(false)
+  const resetAppState = () => {
+    setStoryStarted(false)
+    setMessages([])
+    setContext('')
+    setUserInput('')
+    setCurrentStoryId(null)
+    setActiveView('new')
   }
 
-  const handleLogout = () => {
-    setUser({ 
-      displayName: 'Jogador', 
-      email: 'convidado@exemplo.com' 
+  const formatDate = (timestamp) => {
+    if (!timestamp) return ''
+    const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp)
+    return date.toLocaleDateString('pt-BR') + ' ' + date.toLocaleTimeString('pt-BR', {
+      hour: '2-digit',
+      minute: '2-digit'
     })
-    setShowUserMenu(false)
+  }
+
+  // Loading screen if not authenticated
+  if (!user) {
+    return (
+      <div className="auth-container" ref={appRef}>
+        <div className="auth-card">
+          <div className="auth-header">
+            <div className="logo">📖</div>
+            <h1>Chronicles of Choice</h1>
+            <p>Crie e salve histórias épicas com IA</p>
+          </div>
+          
+          <div className="auth-features">
+            <div className="feature">
+              <span className="feature-icon">🎮</span>
+              <h3>Modos Diversos</h3>
+              <p>Aventura, Romance, Horror e mais</p>
+            </div>
+            <div className="feature">
+              <span className="feature-icon">💾</span>
+              <h3>Salve Automaticamente</h3>
+              <p>Suas histórias são salvas na nuvem</p>
+            </div>
+            <div className="feature">
+              <span className="feature-icon">🚀</span>
+              <h3>IA Avançada</h3>
+              <p>Narrativas inteligentes e coerentes</p>
+            </div>
+          </div>
+
+          <button className="google-signin-btn" onClick={signInWithGoogle}>
+            <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" />
+            Entrar com Google
+          </button>
+
+          <div className="auth-footer">
+            <p>
+              <strong>💡 Importante:</strong> Você precisa fazer login para salvar suas histórias
+            </p>
+          </div>
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -215,7 +420,23 @@ function App() {
         </div>
 
         <div className="header-right">
-          {storyStarted && (
+          {/* Navigation */}
+          <div className="nav-buttons">
+            <button 
+              className={`nav-btn ${activeView === 'new' ? 'active' : ''}`}
+              onClick={() => setActiveView('new')}
+            >
+              Nova História
+            </button>
+            <button 
+              className={`nav-btn ${activeView === 'history' ? 'active' : ''}`}
+              onClick={() => setActiveView('history')}
+            >
+              Minhas Histórias ({savedStories.length})
+            </button>
+          </div>
+
+          {activeView === 'chat' && (
             <button className="header-btn" onClick={exportStory} title="Exportar História">
               💾 Exportar
             </button>
@@ -234,24 +455,25 @@ function App() {
               className="user-avatar"
               onClick={() => setShowUserMenu(!showUserMenu)}
             >
-              <span>👤</span>
+              {user.photoURL ? (
+                <img src={user.photoURL} alt={user.displayName} />
+              ) : (
+                <span>👤</span>
+              )}
             </button>
 
             {showUserMenu && (
               <div className="user-dropdown">
                 <div className="user-info">
-                  <strong>{user.displayName}</strong>
+                  <strong>{user.displayName || 'Usuário'}</strong>
                   <span>{user.email}</span>
                 </div>
-                {user.email === 'convidado@exemplo.com' ? (
-                  <button className="menu-item" onClick={handleLogin}>
-                    🔐 Fazer Login
-                  </button>
-                ) : (
-                  <button className="menu-item" onClick={handleLogout}>
-                    🚪 Sair
-                  </button>
-                )}
+                <div className="user-stats">
+                  <small>{savedStories.length} histórias salvas</small>
+                </div>
+                <button className="menu-item" onClick={handleSignOut}>
+                  🚪 Sair
+                </button>
               </div>
             )}
           </div>
@@ -260,17 +482,12 @@ function App() {
 
       {/* Main Content */}
       <main className="main-content">
-        {!storyStarted ? (
-          // Start Screen
+        {/* New Story View */}
+        {activeView === 'new' && (
           <div className="start-screen">
             <div className="welcome-section">
               <h2>Olá, {user.displayName}! 👋</h2>
-              <p>Pronto para criar uma história épica?</p>
-              {user.email === 'convidado@exemplo.com' && (
-                <div className="guest-notice">
-                  <p>💡 <strong>Dica:</strong> Faça login para salvar seu progresso!</p>
-                </div>
-              )}
+              <p>Pronto para criar uma nova história épica?</p>
             </div>
 
             <div className="setup-panel">
@@ -335,8 +552,66 @@ Seja criativo! Descreva seu personagem, mundo ou situação inicial.`}
               </div>
             </div>
           </div>
-        ) : (
-          // Chat Interface
+        )}
+
+        {/* History View */}
+        {activeView === 'history' && (
+          <div className="history-screen">
+            <div className="history-header">
+              <h2>📚 Minhas Histórias</h2>
+              <p>Continue de onde parou ou relembre aventuras passadas</p>
+            </div>
+
+            {savedStories.length === 0 ? (
+              <div className="empty-history">
+                <div className="empty-icon">📖</div>
+                <h3>Nenhuma história salva ainda</h3>
+                <p>Crie sua primeira história para vê-la aqui!</p>
+                <button 
+                  className="new-story-btn"
+                  onClick={() => setActiveView('new')}
+                >
+                  🚀 Criar Primeira História
+                </button>
+              </div>
+            ) : (
+              <div className="stories-grid">
+                {savedStories.map(story => (
+                  <div 
+                    key={story.id} 
+                    className="story-card"
+                    onClick={() => loadStory(story)}
+                  >
+                    <div className="story-header">
+                      <h3>{story.title || 'História Sem Título'}</h3>
+                      <span className="story-mode">{story.modeName}</span>
+                    </div>
+                    <div className="story-context">
+                      {story.context.substring(0, 150)}
+                      {story.context.length > 150 ? '...' : ''}
+                    </div>
+                    <div className="story-meta">
+                      <span className="message-count">
+                        {story.messages?.length || 0} mensagens
+                      </span>
+                      <span className="story-date">
+                        {formatDate(story.updatedAt)}
+                      </span>
+                    </div>
+                    <div className="story-actions">
+                      <button className="action-btn">
+                        Continuar →
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Chat View */}
+        {activeView === 'chat' && (
           <div className="chat-interface">
             <div className="chat-header">
               <div className="chat-info">
@@ -344,10 +619,18 @@ Seja criativo! Descreva seu personagem, mundo ou situação inicial.`}
                   {availableModes.find(m => m.id === currentMode)?.name}
                 </span>
                 <span className="message-count">{messages.length} mensagens</span>
+                {currentStoryId && (
+                  <span className="saved-badge">💾 Salvo</span>
+                )}
               </div>
-              <button className="new-story-btn" onClick={resetStory}>
-                📝 Nova História
-              </button>
+              <div className="chat-actions">
+                <button className="header-btn" onClick={() => setActiveView('history')}>
+                  📚 Histórias
+                </button>
+                <button className="new-story-btn" onClick={resetStory}>
+                  📝 Nova História
+                </button>
+              </div>
             </div>
 
             {/* Messages */}
@@ -371,7 +654,7 @@ Seja criativo! Descreva seu personagem, mundo ou situação inicial.`}
                       <div className="message-bubble">
                         <p>{message.content}</p>
                         <span className="message-time">
-                          {new Date(message.timestamp).toLocaleTimeString()}
+                          {message.timestamp ? formatDate(message.timestamp) : 'Agora'}
                         </span>
                       </div>
                     </div>
@@ -419,6 +702,7 @@ Seja criativo! Descreva seu personagem, mundo ou situação inicial.`}
               </div>
               <div className="input-hint">
                 Pressione Enter para enviar • Shift+Enter para nova linha
+                {currentStoryId && ' • História sendo salva automaticamente'}
               </div>
             </div>
           </div>
