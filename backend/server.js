@@ -287,6 +287,27 @@ app.get('/api/debug', (req, res) => {
   });
 });
 
+// Rota para obter histórico do usuário
+app.get('/api/user-stories/:userId', (req, res) => {
+  const { userId } = req.params;
+  
+  // Em produção, isso viria de um banco de dados
+  const userStories = Array.from(userSessions.entries())
+    .filter(([key, session]) => key.startsWith(userId))
+    .map(([key, session]) => ({
+      id: key,
+      context: session.context,
+      mode: session.mode.name,
+      createdAt: session.createdAt,
+      messageCount: session.messages.length - 1 // Excluindo system message
+    }));
+  
+  res.json({
+    success: true,
+    stories: userStories
+  });
+});
+
 app.listen(PORT, () => {
   console.log(`🚀 Servidor rodando na porta ${PORT}`);
   console.log(`🔑 Mistral API Key: ${process.env.MISTRAL_API_KEY ? 'CONFIGURADA' : 'NÃO CONFIGURADA'}`);

@@ -1,8 +1,25 @@
 import { useState, useEffect, useRef } from 'react'
+import { initializeApp } from 'firebase/app'
+import { getAuth, signInWithPopup, GoogleAuthProvider, signOut, onAuthStateChanged } from 'firebase/auth'
 import './App.css'
 
+// Firebase config
+const firebaseConfig = {
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID
+}
+
+// Initialize Firebase
+const app = initializeApp(firebaseConfig)
+const auth = getAuth(app)
+
 function App() {
-  const [userId] = useState(() => `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`);
+  const [user, setUser] = useState(null)
+  const [userId, setUserId] = useState(null)
   const [currentMode, setCurrentMode] = useState('adventure')
   const [context, setContext] = useState('')
   const [messages, setMessages] = useState([])
@@ -10,22 +27,69 @@ function App() {
   const [loading, setLoading] = useState(false)
   const [storyStarted, setStoryStarted] = useState(false)
   const [availableModes, setAvailableModes] = useState([])
-  const [showWelcome, setShowWelcome] = useState(true)
+  const [isFullscreen, setIsFullscreen] = useState(false)
+  const [showUserMenu, setShowUserMenu] = useState(false)
 
   const messagesEndRef = useRef(null)
-  const fileInputRef = useRef(null)
+  const appRef = useRef(null)
 
-  // Efeitos de áudio (seriam importados, mas vamos usar emoji por enquanto)
-  const playSound = (type) => {
-    // Em uma versão futura, adicionar sons
-    console.log(`🔊 Playing sound: ${type}`);
+  // Auth state listener
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      if (user) {
+        setUser(user)
+        setUserId(user.uid)
+      } else {
+        setUser(null)
+        setUserId(null)
+      }
+    })
+    return () => unsubscribe()
+  }, [])
+
+  // Google Sign In
+  const signInWithGoogle = async () => {
+    try {
+      const provider = new GoogleAuthProvider()
+      await signInWithPopup(auth, provider)
+    } catch (error) {
+      console.error('Error signing in:', error)
+    }
   }
 
+  // Sign Out
+  const handleSignOut = async () => {
+    try {
+      await signOut(auth)
+      setShowUserMenu(false)
+    } catch (error) {
+      console.error('Error signing out:', error)
+    }
+  }
+
+  // Fullscreen functionality
+  const toggleFullscreen = () => {
+    if (!document.fullscreenElement) {
+      appRef.current?.requestFullscreen?.()
+      setIsFullscreen(true)
+    } else {
+      document.exitFullscreen?.()
+      setIsFullscreen(false)
+    }
+  }
+
+  // Close fullscreen on ESC
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullscreen(!!document.fullscreenElement)
+    }
+
+    document.addEventListener('fullscreenchange', handleFullscreenChange)
+    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange)
+  }, [])
+
   const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ 
-      behavior: "smooth",
-      block: "end"
-    })
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
   }
 
   useEffect(() => {
@@ -34,13 +98,6 @@ function App() {
 
   useEffect(() => {
     fetchAvailableModes()
-    
-    // Esconder welcome após 3 segundos
-    const timer = setTimeout(() => {
-      setShowWelcome(false)
-    }, 3000)
-    
-    return () => clearTimeout(timer)
   }, [])
 
   const fetchAvailableModes = async () => {
@@ -59,13 +116,11 @@ function App() {
 
   const startStory = async () => {
     if (!context.trim()) {
-      showNotification('Por favor, escreva um contexto para sua história!', 'warning')
+      alert('Por favor, escreva um contexto para sua história!')
       return
     }
 
     setLoading(true)
-    playSound('start')
-    
     try {
       const API_URL = import.meta.env.VITE_API_URL
       
@@ -75,7 +130,7 @@ function App() {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({ 
-          userId,
+          userId: userId || `guest_${Date.now()}`,
           context: context.trim(),
           mode: currentMode
         })
@@ -86,13 +141,12 @@ function App() {
       if (data.success) {
         setMessages(data.history || [])
         setStoryStarted(true)
-        showNotification('História iniciada com sucesso!', 'success')
       } else {
-        showNotification('Erro ao iniciar história: ' + data.error, 'error')
+        alert('Erro ao iniciar história: ' + data.error)
       }
     } catch (error) {
       console.error('Erro:', error)
-      showNotification('Erro de conexão: ' + error.message, 'error')
+      alert('Erro de conexão: ' + error.message)
     }
     setLoading(false)
   }
@@ -103,7 +157,6 @@ function App() {
     const userMessage = userInput.trim()
     setUserInput('')
     setLoading(true)
-    playSound('send')
 
     const userMessageObj = {
       role: 'user',
@@ -122,7 +175,7 @@ function App() {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({ 
-          userId,
+          userId: userId || `guest_${Date.now()}`,
           userMessage
         })
       })
@@ -131,14 +184,13 @@ function App() {
       
       if (data.success) {
         setMessages(data.history || [])
-        playSound('receive')
       } else {
-        showNotification('Erro ao continuar história: ' + data.error, 'error')
+        alert('Erro ao continuar história: ' + data.error)
         setMessages(prev => prev.filter(msg => msg !== userMessageObj))
       }
     } catch (error) {
       console.error('Erro:', error)
-      showNotification('Erro de conexão: ' + error.message, 'error')
+      alert('Erro de conexão: ' + error.message)
       setMessages(prev => prev.filter(msg => msg !== userMessageObj))
     }
     setLoading(false)
@@ -160,13 +212,6 @@ function App() {
     setMessages([])
     setContext('')
     setUserInput('')
-    playSound('reset')
-    showNotification('História reiniciada!', 'info')
-  }
-
-  const showNotification = (message, type = 'info') => {
-    // Em uma versão futura, implementar sistema de notificações bonito
-    console.log(`📢 ${type.toUpperCase()}: ${message}`);
   }
 
   const exportStory = () => {
@@ -183,264 +228,264 @@ function App() {
     a.click()
     document.body.removeChild(a)
     URL.revokeObjectURL(url)
-    
-    showNotification('História exportada com sucesso!', 'success')
   }
 
-  const ModeCard = ({ mode, isSelected, onClick }) => (
-    <div 
-      className={`mode-card ${isSelected ? 'selected' : ''}`}
-      onClick={() => onClick(mode.id)}
-    >
-      <div className="mode-icon">
-        {mode.id === 'adventure' && '⚔️'}
-        {mode.id === 'romance' && '💖'}
-        {mode.id === 'horror' && '👻'}
-        {mode.id === 'fantasy' && '🐉'}
+  // Loading screen if not authenticated
+  if (!user) {
+    return (
+      <div className="auth-container" ref={appRef}>
+        <div className="auth-card">
+          <div className="auth-header">
+            <div className="logo">📖</div>
+            <h1>Chronicles of Choice</h1>
+            <p>Crie histórias épicas com IA</p>
+          </div>
+          
+          <div className="auth-features">
+            <div className="feature">
+              <span className="feature-icon">🎮</span>
+              <h3>Modos Diversos</h3>
+              <p>Aventura, Romance, Horror e mais</p>
+            </div>
+            <div className="feature">
+              <span className="feature-icon">💾</span>
+              <h3>Salve seu Progresso</h3>
+              <p>Continue de onde parou</p>
+            </div>
+            <div className="feature">
+              <span className="feature-icon">🚀</span>
+              <h3>IA Avançada</h3>
+              <p>Narrativas inteligentes e coerentes</p>
+            </div>
+          </div>
+
+          <button className="google-signin-btn" onClick={signInWithGoogle}>
+            <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" />
+            Entrar com Google
+          </button>
+
+          <div className="auth-footer">
+            <p>Ou <button className="guest-btn" onClick={() => setUser({ displayName: 'Convidado' })}>
+              continuar como convidado
+            </button></p>
+          </div>
+        </div>
       </div>
-      <h3>{mode.name}</h3>
-      <p>{mode.description}</p>
-      <div className="selection-indicator">
-        {isSelected && '✓'}
-      </div>
-    </div>
-  )
+    )
+  }
 
   return (
-    <div className="app">
-      {/* Welcome Animation */}
-      {showWelcome && (
-        <div className="welcome-overlay">
-          <div className="welcome-content">
-            <div className="logo-animation">
-              <div className="logo">📖</div>
-              <h1>Chronicles of Choice</h1>
-            </div>
-            <div className="loading-bar">
-              <div className="loading-progress"></div>
-            </div>
-          </div>
+    <div className={`app ${isFullscreen ? 'fullscreen' : ''}`} ref={appRef}>
+      {/* Header */}
+      <header className="app-header">
+        <div className="header-left">
+          <div className="logo">📖</div>
+          <h1>Chronicles of Choice</h1>
         </div>
-      )}
 
-      {/* Background Elements */}
-      <div className="background-effects">
-        <div className="floating-shapes">
-          <div className="shape shape-1"></div>
-          <div className="shape shape-2"></div>
-          <div className="shape shape-3"></div>
-          <div className="shape shape-4"></div>
-        </div>
-      </div>
+        <div className="header-right">
+          {storyStarted && (
+            <button className="header-btn" onClick={exportStory} title="Exportar História">
+              💾 Exportar
+            </button>
+          )}
+          
+          <button 
+            className="header-btn" 
+            onClick={toggleFullscreen}
+            title={isFullscreen ? 'Sair da Tela Cheia' : 'Tela Cheia'}
+          >
+            {isFullscreen ? '⤵️' : '⤴️'}
+          </button>
 
-      <div className="app-container">
-        {/* Header */}
-        <header className="app-header">
-          <div className="header-content">
-            <div className="logo-section">
-              <div className="logo">📖</div>
-              <h1>Chronicles of Choice</h1>
-            </div>
-            <div className="header-actions">
-              {storyStarted && (
-                <>
-                  <button className="icon-button" onClick={exportStory} title="Exportar História">
-                    💾
-                  </button>
-                  <button className="icon-button" onClick={resetStory} title="Nova História">
-                    🔄
-                  </button>
-                </>
+          <div className="user-menu">
+            <button 
+              className="user-avatar"
+              onClick={() => setShowUserMenu(!showUserMenu)}
+            >
+              {user.photoURL ? (
+                <img src={user.photoURL} alt={user.displayName} />
+              ) : (
+                <span>👤</span>
               )}
+            </button>
+
+            {showUserMenu && (
+              <div className="user-dropdown">
+                <div className="user-info">
+                  <strong>{user.displayName || 'Usuário'}</strong>
+                  <span>{user.email || 'convidado@exemplo.com'}</span>
+                </div>
+                <button className="menu-item" onClick={handleSignOut}>
+                  🚪 Sair
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      </header>
+
+      {/* Main Content */}
+      <main className="main-content">
+        {!storyStarted ? (
+          // Start Screen
+          <div className="start-screen">
+            <div className="welcome-section">
+              <h2>Olá, {user.displayName || 'Aventureiro'}! 👋</h2>
+              <p>Pronto para criar uma história épica?</p>
+            </div>
+
+            <div className="setup-panel">
+              {/* Mode Selection */}
+              <section className="mode-section">
+                <h3>🎮 Escolha o Modo</h3>
+                <div className="mode-grid">
+                  {availableModes.map(mode => (
+                    <div
+                      key={mode.id}
+                      className={`mode-card ${currentMode === mode.id ? 'selected' : ''}`}
+                      onClick={() => setCurrentMode(mode.id)}
+                    >
+                      <div className="mode-icon">
+                        {mode.id === 'adventure' && '⚔️'}
+                        {mode.id === 'romance' && '💖'}
+                        {mode.id === 'horror' && '👻'}
+                        {mode.id === 'fantasy' && '🐉'}
+                      </div>
+                      <h4>{mode.name}</h4>
+                      <p>{mode.description}</p>
+                    </div>
+                  ))}
+                </div>
+              </section>
+
+              {/* Context Input */}
+              <section className="context-section">
+                <h3>✨ Contexto da História</h3>
+                <div className="context-input-wrapper">
+                  <textarea
+                    value={context}
+                    onChange={(e) => setContext(e.target.value)}
+                    placeholder={`Exemplo: "Sou um cavaleiro em busca do dragão lendário que aterroriza o reino. Minha espada está afiada e meu coração cheio de coragem."
+
+Seja criativo! Descreva seu personagem, mundo ou situação inicial.`}
+                    rows="5"
+                    className="context-textarea"
+                  />
+                  <div className="textarea-footer">
+                    <span>{context.length}/1000 caracteres</span>
+                  </div>
+                </div>
+              </section>
+
+              {/* Action Button */}
+              <div className="action-section">
+                <button
+                  onClick={startStory}
+                  disabled={loading || !context.trim()}
+                  className="start-button"
+                >
+                  {loading ? (
+                    <>
+                      <div className="spinner"></div>
+                      Iniciando...
+                    </>
+                  ) : (
+                    '🚀 Começar Jornada'
+                  )}
+                </button>
+              </div>
             </div>
           </div>
-        </header>
-
-        {/* Main Content */}
-        <main className="main-content">
-          {!storyStarted ? (
-            // Start Screen
-            <div className="start-screen">
-              <div className="hero-section">
-                <h2>Crie Histórias Épicas com IA</h2>
-                <p>Entre em mundos fantásticos onde suas escolhas moldam o destino</p>
+        ) : (
+          // Chat Interface
+          <div className="chat-interface">
+            <div className="chat-header">
+              <div className="chat-info">
+                <span className="mode-tag">
+                  {availableModes.find(m => m.id === currentMode)?.name}
+                </span>
+                <span className="message-count">{messages.length} mensagens</span>
               </div>
-
-              <div className="setup-panel">
-                {/* Mode Selection */}
-                <section className="mode-section">
-                  <h3>🎮 Escolha seu Modo de Aventura</h3>
-                  <div className="mode-grid">
-                    {availableModes.map(mode => (
-                      <ModeCard
-                        key={mode.id}
-                        mode={mode}
-                        isSelected={currentMode === mode.id}
-                        onClick={setCurrentMode}
-                      />
-                    ))}
-                  </div>
-                </section>
-
-                {/* Context Input */}
-                <section className="context-section">
-                  <h3>✨ Crie seu Contexto</h3>
-                  <div className="context-input-container">
-                    <textarea
-                      value={context}
-                      onChange={(e) => setContext(e.target.value)}
-                      placeholder={`🎭 Descreva seu personagem e mundo...
-
-Exemplos:
-• "Sou um ladino elfo em busca do Cristal Perdido de Eldoria"
-• "Uma estudante universitária descobre poderes mágicos em uma biblioteca antiga"
-• "Um androide ganha consciência em uma sociedade distópica"
-
-Seja criativo! A IA se adaptará à sua visão.`}
-                      rows="6"
-                      className="context-textarea"
-                    />
-                    <div className="textarea-footer">
-                      <span className="char-count">{context.length}/500</span>
-                    </div>
-                  </div>
-                </section>
-
-                {/* Action Button */}
-                <div className="action-section">
-                  <button 
-                    onClick={startStory}
-                    disabled={loading || !context.trim()}
-                    className={`start-button ${loading ? 'loading' : ''}`}
-                  >
-                    {loading ? (
-                      <>
-                        <div className="button-spinner"></div>
-                        Iniciando Aventura...
-                      </>
-                    ) : (
-                      <>
-                        🚀 Iniciar Jornada Épica
-                      </>
-                    )}
-                  </button>
-                </div>
-              </div>
+              <button className="new-story-btn" onClick={resetStory}>
+                📝 Nova História
+              </button>
             </div>
-          ) : (
-            // Chat Interface
-            <div className="chat-interface">
-              <div className="chat-header">
-                <div className="chat-info">
-                  <span className="mode-badge">
-                    {availableModes.find(m => m.id === currentMode)?.name}
-                  </span>
-                  <span className="message-count">
-                    {messages.length} mensagens
-                  </span>
-                </div>
-                <div className="chat-actions">
-                  <button className="action-btn secondary" onClick={exportStory}>
-                    💾 Exportar
-                  </button>
-                  <button className="action-btn primary" onClick={resetStory}>
-                    🎮 Nova História
-                  </button>
-                </div>
-              </div>
 
-              {/* Messages Container */}
-              <div className="messages-container">
-                {messages.length === 0 ? (
-                  <div className="empty-state">
-                    <div className="empty-icon">📖</div>
-                    <h3>Sua História Começa Aqui</h3>
-                    <p>Escreva sua primeira mensagem para dar início à aventura!</p>
-                  </div>
-                ) : (
-                  messages.map((message, index) => (
-                    <div 
-                      key={index} 
-                      className={`message ${message.role} ${index === messages.length - 1 ? 'last' : ''}`}
-                    >
-                      <div className="message-avatar">
-                        {message.role === 'user' ? '👤' : '🤖'}
-                      </div>
-                      <div className="message-content">
-                        <div className="message-bubble">
-                          <div className="message-text">
-                            {message.content}
-                          </div>
-                          <div className="message-time">
-                            {new Date(message.timestamp).toLocaleTimeString([], { 
-                              hour: '2-digit', 
-                              minute: '2-digit' 
-                            })}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  ))
-                )}
-                
-                {/* Loading Message */}
-                {loading && (
-                  <div className="message assistant loading">
+            {/* Messages */}
+            <div className="messages-container">
+              {messages.length === 0 ? (
+                <div className="empty-chat">
+                  <div className="empty-icon">💬</div>
+                  <h3>Sua aventura começa aqui</h3>
+                  <p>Envie sua primeira mensagem para iniciar a história</p>
+                </div>
+              ) : (
+                messages.map((message, index) => (
+                  <div
+                    key={index}
+                    className={`message ${message.role}`}
+                  >
                     <div className="message-avatar">
-                      🤖
+                      {message.role === 'user' ? '👤' : '🤖'}
                     </div>
                     <div className="message-content">
                       <div className="message-bubble">
-                        <div className="typing-indicator">
-                          <span></span>
-                          <span></span>
-                          <span></span>
-                        </div>
+                        <p>{message.content}</p>
+                        <span className="message-time">
+                          {new Date(message.timestamp).toLocaleTimeString()}
+                        </span>
                       </div>
                     </div>
                   </div>
-                )}
-                
-                <div ref={messagesEndRef} className="scroll-anchor" />
-              </div>
+                ))
+              )}
+              
+              {loading && (
+                <div className="message assistant">
+                  <div className="message-avatar">🤖</div>
+                  <div className="message-content">
+                    <div className="message-bubble">
+                      <div className="typing-indicator">
+                        <span></span>
+                        <span></span>
+                        <span></span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+              
+              <div ref={messagesEndRef} />
+            </div>
 
-              {/* Input Area */}
-              <div className="input-area">
-                <div className="input-container">
-                  <textarea
-                    value={userInput}
-                    onChange={(e) => setUserInput(e.target.value)}
-                    onKeyPress={handleKeyPress}
-                    placeholder="🎭 Descreva sua ação, fale com personagens ou tome uma decisão importante..."
-                    rows="2"
-                    disabled={loading}
-                    className="message-input"
-                  />
-                  <button 
-                    onClick={sendMessage}
-                    disabled={loading || !userInput.trim()}
-                    className="send-button"
-                  >
-                    {loading ? (
-                      <div className="send-spinner"></div>
-                    ) : (
-                      '📤'
-                    )}
-                  </button>
-                </div>
-                <div className="input-hint">
-                  Pressione Enter para enviar • Shift+Enter para nova linha
-                </div>
+            {/* Input Area */}
+            <div className="input-section">
+              <div className="input-container">
+                <textarea
+                  value={userInput}
+                  onChange={(e) => setUserInput(e.target.value)}
+                  onKeyPress={handleKeyPress}
+                  placeholder="Descreva sua ação ou fale com os personagens..."
+                  rows="2"
+                  disabled={loading}
+                  className="message-input"
+                />
+                <button
+                  onClick={sendMessage}
+                  disabled={loading || !userInput.trim()}
+                  className="send-button"
+                >
+                  {loading ? <div className="spinner-small"></div> : '📤'}
+                </button>
+              </div>
+              <div className="input-hint">
+                Pressione Enter para enviar • Shift+Enter para nova linha
               </div>
             </div>
-          )}
-        </main>
-
-        {/* Footer */}
-        <footer className="app-footer">
-          <p>Criado com 💖 usando Mistral AI • Sua imaginação é o limite</p>
-        </footer>
-      </div>
+          </div>
+        )}
+      </main>
     </div>
   )
 }
