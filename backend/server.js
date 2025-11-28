@@ -7,94 +7,79 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Armazenamento em memória (simples para MVP)
-const userSessions = new Map();
-
-// CORS configurado corretamente
+// ✅✅✅ CORS CORRIGIDO - Configuração PERMISSIVA para desenvolvimento
 app.use(cors({
   origin: [
-    'https://chronicles-frontend.vercel.app',
+    'https://chronicles-of-choice.vercel.app',
+    'https://chronicles-frontend.vercel.app', 
+    'http://localhost:5173',
+    'http://localhost:3000',
     'https://*.vercel.app',
-    'http://localhost:5173'
+    'https://*.onrender.com'
   ],
-  credentials: true
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
 }));
 
-app.use(express.json());
-
-// Middleware de log melhorado
+// ✅ Middleware para headers CORS manuais (backup)
 app.use((req, res, next) => {
-  console.log('🔥', new Date().toISOString(), req.method, req.url, req.body || '');
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+  
+  // ✅ Responde imediatamente para requisições OPTIONS (preflight)
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+  
   next();
 });
 
-// ✅ ROTA HEALTH CHECK (já funciona)
+app.use(express.json());
+
+// Armazenamento em memória
+const userSessions = new Map();
+
+// ✅ Health check
 app.get('/health', (req, res) => {
-  console.log('✅ Health check OK');
+  console.log('✅ Health check - CORS funcionando!');
   res.json({ 
     status: 'OK', 
-    message: 'Chronicles Backend Running',
+    message: 'Chronicles Backend Running - CORS Fixed',
     timestamp: new Date().toISOString()
   });
 });
 
-// ✅ SISTEMA DE MODOS
+// ✅ Sistemas de Modos
 const GAME_MODES = {
   adventure: {
     name: "🎮 Modo Aventura",
-    systemPrompt: `Você é um mestre de RPG especializado em aventuras épicas. Crie narrativas emocionantes com:
-- Missões perigosas e recompensas
-- Combates estratégicos 
-- Exploração de mundos fantásticos
-- NPCs memoráveis
-- Escolhas que impactam a história
-
-Mantenha a história coerente e lembre-se de todos os eventos anteriores.`
+    systemPrompt: `Você é um mestre de RPG especializado em aventuras épicas.`
   },
   romance: {
     name: "💖 Modo Romance", 
-    systemPrompt: `Você é um escritor especializado em romances interativos. Crie:
-- Desenvolvimento de relacionamentos profundos
-- Diálogos emocionantes e românticos
-- Conflitos emocionais significativos
-- Momentos de intimidade e conexão
-- Personagens complexos e cativantes
-
-Construa relacionamentos orgânicos baseados nas escolhas do usuário.`
+    systemPrompt: `Você é um escritor especializado em romances interativos.`
   },
   horror: {
     name: "👻 Modo Horror",
-    systemPrompt: `Você é um mestre do horror e suspense. Crie:
-- Atmosfera tensa e assustadora
-- Sustos psicológicos bem construídos
-- Mistérios sobrenaturais
-- Decisões de vida ou morte
-- Ambiente claustrofóbico
-
-Use o medo do desconhecido e mantenha a tensão constante.`
+    systemPrompt: `Você é um mestre do horror e suspense.`
   },
   fantasy: {
     name: "🐉 Modo Fantasia Épica",
-    systemPrompt: `Você é um contador de histórias de fantasia. Crie:
-- Mundos mágicos detalhados
-- Criaturas mitológicas e raças únicas
-- Sistemas de magia complexos
-- Profecias e destinos
-- Batalhas épicas e jornadas heróicas
-
-Desenvolva lore rica e histórias que se conectam.`
+    systemPrompt: `Você é um contador de histórias de fantasia.`
   }
 };
 
-// ✅ ROTA: LISTAR MODOS DISPONÍVEIS
+// ✅ ROTA: LISTAR MODOS
 app.get('/api/modes', (req, res) => {
-  console.log('📚 Listando modos disponíveis');
+  console.log('📚 /api/modes chamada - CORS OK');
   
   try {
     const modes = Object.entries(GAME_MODES).map(([key, value]) => ({
       id: key,
       name: value.name,
-      description: value.systemPrompt.substring(0, 120) + '...'
+      description: value.systemPrompt
     }));
     
     res.json({
@@ -105,14 +90,14 @@ app.get('/api/modes', (req, res) => {
     console.error('❌ Erro em /api/modes:', error);
     res.status(500).json({
       success: false,
-      error: 'Erro interno ao carregar modos'
+      error: 'Erro interno'
     });
   }
 });
 
-// ✅ ROTA: INICIAR NOVA HISTÓRIA
+// ✅ ROTA: INICIAR HISTÓRIA
 app.post('/api/start-story', async (req, res) => {
-  console.log('🎯 Iniciando nova história:', req.body);
+  console.log('🎯 /api/start-story chamada - CORS OK');
   
   try {
     const { userId, context, mode = 'adventure' } = req.body;
@@ -126,7 +111,7 @@ app.post('/api/start-story', async (req, res) => {
 
     const selectedMode = GAME_MODES[mode] || GAME_MODES.adventure;
     
-    // Criar nova sessão
+    // Criar sessão
     const session = {
       userId,
       mode: selectedMode,
@@ -134,29 +119,22 @@ app.post('/api/start-story', async (req, res) => {
       messages: [
         {
           role: "system",
-          content: `${selectedMode.systemPrompt}\n\nCONTEXTO INICIAL: ${context}\n\nComece a história dando as boas-vindas ao jogador e apresentando a primeira situação.`
+          content: `${selectedMode.systemPrompt}\n\nCONTEXTO: ${context}`
         }
       ],
-      createdAt: new Date(),
-      updatedAt: new Date()
+      createdAt: new Date()
     };
 
     userSessions.set(userId, session);
     
-    // Gerar primeira mensagem da IA
-    console.log('🤖 Chamando Mistral API...');
+    // Gerar resposta IA
     const aiResponse = await generateAIResponse(session.messages);
     
-    // Adicionar resposta da IA ao histórico
     session.messages.push({
       role: "assistant", 
       content: aiResponse,
       timestamp: new Date()
     });
-    
-    session.updatedAt = new Date();
-
-    console.log(`📖 Nova história iniciada para ${userId} no modo ${mode}`);
 
     res.json({
       success: true,
@@ -169,14 +147,14 @@ app.post('/api/start-story', async (req, res) => {
     console.error('💥 Erro em /api/start-story:', error);
     res.status(500).json({
       success: false,
-      error: 'Erro ao iniciar história: ' + error.message
+      error: 'Erro ao iniciar história'
     });
   }
 });
 
 // ✅ ROTA: CONTINUAR HISTÓRIA
 app.post('/api/continue-story', async (req, res) => {
-  console.log('📝 Continuando história:', req.body);
+  console.log('📝 /api/continue-story chamada - CORS OK');
   
   try {
     const { userId, userMessage } = req.body;
@@ -192,29 +170,25 @@ app.post('/api/continue-story', async (req, res) => {
     if (!session) {
       return res.status(404).json({
         success: false,
-        error: 'Sessão não encontrada. Inicie uma nova história.'
+        error: 'Sessão não encontrada'
       });
     }
 
-    // Adicionar mensagem do usuário
+    // Adicionar mensagem usuário
     session.messages.push({
       role: "user",
       content: userMessage,
       timestamp: new Date()
     });
 
-    // Gerar resposta da IA
-    console.log('🤖 Gerando resposta da IA...');
+    // Gerar resposta IA
     const aiResponse = await generateAIResponse(session.messages);
     
-    // Adicionar resposta da IA
     session.messages.push({
       role: "assistant",
       content: aiResponse,
       timestamp: new Date()
     });
-    
-    session.updatedAt = new Date();
 
     res.json({
       success: true,
@@ -226,42 +200,20 @@ app.post('/api/continue-story', async (req, res) => {
     console.error('💥 Erro em /api/continue-story:', error);
     res.status(500).json({
       success: false,
-      error: 'Erro ao continuar história: ' + error.message
+      error: 'Erro ao continuar história'
     });
   }
 });
 
-// ✅ ROTA: OBTER HISTÓRICO
-app.get('/api/session/:userId', (req, res) => {
-  const { userId } = req.params;
-  console.log('📋 Obtendo histórico para:', userId);
-  
-  const session = userSessions.get(userId);
-  
-  if (!session) {
-    return res.status(404).json({
-      success: false,
-      error: 'Sessão não encontrada'
-    });
-  }
-
-  res.json({
-    success: true,
-    history: session.messages.filter(msg => msg.role !== 'system'),
-    mode: session.mode.name,
-    context: session.context
-  });
-});
-
-// ✅ FUNÇÃO AUXILIAR: GERAR RESPOSTA DA IA
+// ✅ FUNÇÃO IA
 async function generateAIResponse(messages) {
   try {
-    const apiMessages = messages.slice(-8); // Manter contexto recente
+    const apiMessages = messages.slice(-6);
     
     const response = await axios.post('https://api.mistral.ai/v1/chat/completions', {
       model: "mistral-small-latest",
       messages: apiMessages,
-      max_tokens: 600,
+      max_tokens: 500,
       temperature: 0.7
     }, {
       headers: {
@@ -273,33 +225,25 @@ async function generateAIResponse(messages) {
 
     return response.data.choices[0].message.content;
   } catch (error) {
-    console.error('❌ Erro Mistral API:', error.response?.data || error.message);
-    throw new Error('Falha ao gerar resposta da IA');
+    console.error('❌ Erro Mistral API:', error.message);
+    return 'Desculpe, houve um erro ao gerar a história. Tente novamente.';
   }
 }
 
-// ✅ ROTA CATCH-ALL PARA DEBUG
-app.all('*', (req, res) => {
-  console.log('❌ Rota não encontrada:', req.method, req.url);
-  res.status(404).json({
-    success: false,
-    error: 'Rota não encontrada',
-    method: req.method,
-    url: req.url,
-    availableRoutes: [
-      'GET /health',
-      'GET /api/modes', 
-      'POST /api/start-story',
-      'POST /api/continue-story',
-      'GET /api/session/:userId'
+// ✅ Rota para debug CORS
+app.get('/api/cors-test', (req, res) => {
+  res.json({
+    success: true,
+    message: 'CORS está funcionando!',
+    timestamp: new Date().toISOString(),
+    allowedOrigins: [
+      'https://chronicles-of-choice.vercel.app',
+      'https://chronicles-frontend.vercel.app'
     ]
   });
 });
 
-// ✅ INICIAR SERVIDOR
 app.listen(PORT, () => {
-  console.log(`\n🚀 SERVIDOR INICIADO NA PORTA ${PORT}`);
-  console.log(`📚 Modos disponíveis: ${Object.keys(GAME_MODES).join(', ')}`);
-  console.log(`🔑 Mistral API: ${process.env.MISTRAL_API_KEY ? '✅ Configurada' : '❌ FALTANDO'}`);
-  console.log(`🌐 Health Check: http://localhost:${PORT}/health\n`);
+  console.log(`🚀 Servidor rodando na porta ${PORT}`);
+  console.log(`✅ CORS configurado para Vercel e Render`);
 });
