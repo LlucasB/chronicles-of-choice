@@ -1,25 +1,9 @@
 import { useState, useEffect, useRef } from 'react'
-import { initializeApp } from 'firebase/app'
-import { getAuth, signInWithPopup, GoogleAuthProvider, signOut, onAuthStateChanged } from 'firebase/auth'
 import './App.css'
 
-// Firebase config
-const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-  appId: import.meta.env.VITE_FIREBASE_APP_ID
-}
-
-// Initialize Firebase
-const app = initializeApp(firebaseConfig)
-const auth = getAuth(app)
-
 function App() {
-  const [user, setUser] = useState(null)
-  const [userId, setUserId] = useState(null)
+  const [user, setUser] = useState({ displayName: 'Jogador', email: 'convidado@exemplo.com' })
+  const [userId] = useState(() => `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`)
   const [currentMode, setCurrentMode] = useState('adventure')
   const [context, setContext] = useState('')
   const [messages, setMessages] = useState([])
@@ -33,39 +17,11 @@ function App() {
   const messagesEndRef = useRef(null)
   const appRef = useRef(null)
 
-  // Auth state listener
+  // Simular login - remover quando adicionar Firebase
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      if (user) {
-        setUser(user)
-        setUserId(user.uid)
-      } else {
-        setUser(null)
-        setUserId(null)
-      }
-    })
-    return () => unsubscribe()
+    // Usuário convidado por padrão
+    setUser({ displayName: 'Jogador', email: 'convidado@exemplo.com' })
   }, [])
-
-  // Google Sign In
-  const signInWithGoogle = async () => {
-    try {
-      const provider = new GoogleAuthProvider()
-      await signInWithPopup(auth, provider)
-    } catch (error) {
-      console.error('Error signing in:', error)
-    }
-  }
-
-  // Sign Out
-  const handleSignOut = async () => {
-    try {
-      await signOut(auth)
-      setShowUserMenu(false)
-    } catch (error) {
-      console.error('Error signing out:', error)
-    }
-  }
 
   // Fullscreen functionality
   const toggleFullscreen = () => {
@@ -130,7 +86,7 @@ function App() {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({ 
-          userId: userId || `guest_${Date.now()}`,
+          userId: userId,
           context: context.trim(),
           mode: currentMode
         })
@@ -175,7 +131,7 @@ function App() {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({ 
-          userId: userId || `guest_${Date.now()}`,
+          userId: userId,
           userMessage
         })
       })
@@ -228,50 +184,25 @@ function App() {
     a.click()
     document.body.removeChild(a)
     URL.revokeObjectURL(url)
+    
+    alert('História exportada com sucesso!')
   }
 
-  // Loading screen if not authenticated
-  if (!user) {
-    return (
-      <div className="auth-container" ref={appRef}>
-        <div className="auth-card">
-          <div className="auth-header">
-            <div className="logo">📖</div>
-            <h1>Chronicles of Choice</h1>
-            <p>Crie histórias épicas com IA</p>
-          </div>
-          
-          <div className="auth-features">
-            <div className="feature">
-              <span className="feature-icon">🎮</span>
-              <h3>Modos Diversos</h3>
-              <p>Aventura, Romance, Horror e mais</p>
-            </div>
-            <div className="feature">
-              <span className="feature-icon">💾</span>
-              <h3>Salve seu Progresso</h3>
-              <p>Continue de onde parou</p>
-            </div>
-            <div className="feature">
-              <span className="feature-icon">🚀</span>
-              <h3>IA Avançada</h3>
-              <p>Narrativas inteligentes e coerentes</p>
-            </div>
-          </div>
+  // Simular login/logout
+  const handleLogin = () => {
+    setUser({ 
+      displayName: 'Jogador Conectado', 
+      email: 'usuario@exemplo.com' 
+    })
+    setShowUserMenu(false)
+  }
 
-          <button className="google-signin-btn" onClick={signInWithGoogle}>
-            <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" />
-            Entrar com Google
-          </button>
-
-          <div className="auth-footer">
-            <p>Ou <button className="guest-btn" onClick={() => setUser({ displayName: 'Convidado' })}>
-              continuar como convidado
-            </button></p>
-          </div>
-        </div>
-      </div>
-    )
+  const handleLogout = () => {
+    setUser({ 
+      displayName: 'Jogador', 
+      email: 'convidado@exemplo.com' 
+    })
+    setShowUserMenu(false)
   }
 
   return (
@@ -303,22 +234,24 @@ function App() {
               className="user-avatar"
               onClick={() => setShowUserMenu(!showUserMenu)}
             >
-              {user.photoURL ? (
-                <img src={user.photoURL} alt={user.displayName} />
-              ) : (
-                <span>👤</span>
-              )}
+              <span>👤</span>
             </button>
 
             {showUserMenu && (
               <div className="user-dropdown">
                 <div className="user-info">
-                  <strong>{user.displayName || 'Usuário'}</strong>
-                  <span>{user.email || 'convidado@exemplo.com'}</span>
+                  <strong>{user.displayName}</strong>
+                  <span>{user.email}</span>
                 </div>
-                <button className="menu-item" onClick={handleSignOut}>
-                  🚪 Sair
-                </button>
+                {user.email === 'convidado@exemplo.com' ? (
+                  <button className="menu-item" onClick={handleLogin}>
+                    🔐 Fazer Login
+                  </button>
+                ) : (
+                  <button className="menu-item" onClick={handleLogout}>
+                    🚪 Sair
+                  </button>
+                )}
               </div>
             )}
           </div>
@@ -331,8 +264,13 @@ function App() {
           // Start Screen
           <div className="start-screen">
             <div className="welcome-section">
-              <h2>Olá, {user.displayName || 'Aventureiro'}! 👋</h2>
+              <h2>Olá, {user.displayName}! 👋</h2>
               <p>Pronto para criar uma história épica?</p>
+              {user.email === 'convidado@exemplo.com' && (
+                <div className="guest-notice">
+                  <p>💡 <strong>Dica:</strong> Faça login para salvar seu progresso!</p>
+                </div>
+              )}
             </div>
 
             <div className="setup-panel">
