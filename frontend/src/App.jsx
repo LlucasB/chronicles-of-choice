@@ -10,21 +10,37 @@ function App() {
   const [loading, setLoading] = useState(false)
   const [storyStarted, setStoryStarted] = useState(false)
   const [availableModes, setAvailableModes] = useState([])
+  const [showWelcome, setShowWelcome] = useState(true)
 
   const messagesEndRef = useRef(null)
+  const fileInputRef = useRef(null)
 
-  // Rolagem automática para a última mensagem
+  // Efeitos de áudio (seriam importados, mas vamos usar emoji por enquanto)
+  const playSound = (type) => {
+    // Em uma versão futura, adicionar sons
+    console.log(`🔊 Playing sound: ${type}`);
+  }
+
   const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
+    messagesEndRef.current?.scrollIntoView({ 
+      behavior: "smooth",
+      block: "end"
+    })
   }
 
   useEffect(() => {
     scrollToBottom()
   }, [messages])
 
-  // Carregar modos disponíveis
   useEffect(() => {
     fetchAvailableModes()
+    
+    // Esconder welcome após 3 segundos
+    const timer = setTimeout(() => {
+      setShowWelcome(false)
+    }, 3000)
+    
+    return () => clearTimeout(timer)
   }, [])
 
   const fetchAvailableModes = async () => {
@@ -41,14 +57,15 @@ function App() {
     }
   }
 
-  // Iniciar nova história
   const startStory = async () => {
     if (!context.trim()) {
-      alert('Por favor, escreva um contexto para sua história!')
+      showNotification('Por favor, escreva um contexto para sua história!', 'warning')
       return
     }
 
     setLoading(true)
+    playSound('start')
+    
     try {
       const API_URL = import.meta.env.VITE_API_URL
       
@@ -69,25 +86,25 @@ function App() {
       if (data.success) {
         setMessages(data.history || [])
         setStoryStarted(true)
+        showNotification('História iniciada com sucesso!', 'success')
       } else {
-        alert('Erro ao iniciar história: ' + data.error)
+        showNotification('Erro ao iniciar história: ' + data.error, 'error')
       }
     } catch (error) {
       console.error('Erro:', error)
-      alert('Erro de conexão: ' + error.message)
+      showNotification('Erro de conexão: ' + error.message, 'error')
     }
     setLoading(false)
   }
 
-  // Enviar mensagem para continuar a história
   const sendMessage = async () => {
     if (!userInput.trim() || loading) return
 
     const userMessage = userInput.trim()
     setUserInput('')
     setLoading(true)
+    playSound('send')
 
-    // Adicionar mensagem do usuário imediatamente
     const userMessageObj = {
       role: 'user',
       content: userMessage,
@@ -114,15 +131,14 @@ function App() {
       
       if (data.success) {
         setMessages(data.history || [])
+        playSound('receive')
       } else {
-        alert('Erro ao continuar história: ' + data.error)
-        // Remover a mensagem do usuário se deu erro
+        showNotification('Erro ao continuar história: ' + data.error, 'error')
         setMessages(prev => prev.filter(msg => msg !== userMessageObj))
       }
     } catch (error) {
       console.error('Erro:', error)
-      alert('Erro de conexão: ' + error.message)
-      // Remover a mensagem do usuário se deu erro
+      showNotification('Erro de conexão: ' + error.message, 'error')
       setMessages(prev => prev.filter(msg => msg !== userMessageObj))
     }
     setLoading(false)
@@ -144,241 +160,287 @@ function App() {
     setMessages([])
     setContext('')
     setUserInput('')
+    playSound('reset')
+    showNotification('História reiniciada!', 'info')
   }
 
+  const showNotification = (message, type = 'info') => {
+    // Em uma versão futura, implementar sistema de notificações bonito
+    console.log(`📢 ${type.toUpperCase()}: ${message}`);
+  }
+
+  const exportStory = () => {
+    const storyText = messages.map(msg => 
+      `${msg.role === 'user' ? '👤 Você' : '📖 Narrador'}: ${msg.content}`
+    ).join('\n\n')
+    
+    const blob = new Blob([storyText], { type: 'text/plain' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `historia-${new Date().toISOString().split('T')[0]}.txt`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+    
+    showNotification('História exportada com sucesso!', 'success')
+  }
+
+  const ModeCard = ({ mode, isSelected, onClick }) => (
+    <div 
+      className={`mode-card ${isSelected ? 'selected' : ''}`}
+      onClick={() => onClick(mode.id)}
+    >
+      <div className="mode-icon">
+        {mode.id === 'adventure' && '⚔️'}
+        {mode.id === 'romance' && '💖'}
+        {mode.id === 'horror' && '👻'}
+        {mode.id === 'fantasy' && '🐉'}
+      </div>
+      <h3>{mode.name}</h3>
+      <p>{mode.description}</p>
+      <div className="selection-indicator">
+        {isSelected && '✓'}
+      </div>
+    </div>
+  )
+
   return (
-    <div className="app" style={{ 
-      padding: '20px', 
-      fontFamily: 'Arial, sans-serif',
-      maxWidth: '800px',
-      margin: '0 auto',
-      height: '100vh',
-      display: 'flex',
-      flexDirection: 'column'
-    }}>
-      <header style={{ 
-        textAlign: 'center', 
-        marginBottom: '20px',
-        borderBottom: '2px solid #007bff',
-        paddingBottom: '10px'
-      }}>
-        <h1 style={{ margin: 0, color: '#007bff' }}>📖 Chronicles of Choice</h1>
-        <p style={{ margin: '5px 0 0 0', color: '#666' }}>
-          Crie e viva histórias interativas com IA
-        </p>
-      </header>
-
-      {!storyStarted ? (
-        // Tela de Início - Configuração
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '20px' }}>
-          <div>
-            <label style={{ display: 'block', marginBottom: '8px', fontWeight: 'bold' }}>
-              🎮 Escolha o Modo de Jogo:
-            </label>
-            <select 
-              value={currentMode} 
-              onChange={(e) => setCurrentMode(e.target.value)}
-              style={{ 
-                width: '100%',
-                padding: '10px',
-                fontSize: '16px',
-                border: '1px solid #ccc',
-                borderRadius: '5px'
-              }}
-            >
-              {availableModes.map(mode => (
-                <option key={mode.id} value={mode.id}>
-                  {mode.name}
-                </option>
-              ))}
-            </select>
-            {availableModes.find(m => m.id === currentMode) && (
-              <p style={{ fontSize: '14px', color: '#666', marginTop: '5px' }}>
-                {availableModes.find(m => m.id === currentMode).description}
-              </p>
-            )}
-          </div>
-
-          <div>
-            <label style={{ display: 'block', marginBottom: '8px', fontWeight: 'bold' }}>
-              ✍️ Contexto da História:
-            </label>
-            <textarea
-              value={context}
-              onChange={(e) => setContext(e.target.value)}
-              placeholder={`Descreva o contexto inicial. Exemplo:
-"Eu sou um cavaleiro exilado procurando redenção. Minha família foi traída pelo rei, e agora busco provar minha honra enquanto viajo pelas terras esquecidas."
-
-Ou seja criativo! A IA se adaptará ao seu contexto.`}
-              rows="6"
-              style={{ 
-                width: '100%',
-                padding: '10px',
-                fontSize: '16px',
-                border: '1px solid #ccc',
-                borderRadius: '5px',
-                resize: 'vertical'
-              }}
-            />
-          </div>
-
-          <button 
-            onClick={startStory}
-            disabled={loading || !context.trim()}
-            style={{ 
-              padding: '12px 24px',
-              fontSize: '18px',
-              backgroundColor: loading ? '#ccc' : '#007bff',
-              color: 'white',
-              border: 'none',
-              borderRadius: '5px',
-              cursor: (loading || !context.trim()) ? 'not-allowed' : 'pointer',
-              alignSelf: 'center'
-            }}
-          >
-            {loading ? '🔄 Iniciando...' : '🚀 Começar História'}
-          </button>
-        </div>
-      ) : (
-        // Tela de Chat - História em Andamento
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-          {/* Header do Chat */}
-          <div style={{ 
-            display: 'flex', 
-            justifyContent: 'space-between', 
-            alignItems: 'center',
-            padding: '10px 0',
-            borderBottom: '1px solid #eee',
-            marginBottom: '10px'
-          }}>
-            <div>
-              <strong>Modo: {availableModes.find(m => m.id === currentMode)?.name}</strong>
+    <div className="app">
+      {/* Welcome Animation */}
+      {showWelcome && (
+        <div className="welcome-overlay">
+          <div className="welcome-content">
+            <div className="logo-animation">
+              <div className="logo">📖</div>
+              <h1>Chronicles of Choice</h1>
             </div>
-            <button 
-              onClick={resetStory}
-              style={{ 
-                padding: '5px 10px',
-                backgroundColor: '#dc3545',
-                color: 'white',
-                border: 'none',
-                borderRadius: '3px',
-                cursor: 'pointer',
-                fontSize: '12px'
-              }}
-            >
-              Nova História
-            </button>
-          </div>
-
-          {/* Área de Mensagens */}
-          <div style={{ 
-            flex: 1,
-            overflowY: 'auto',
-            padding: '10px',
-            border: '1px solid #ddd',
-            borderRadius: '5px',
-            marginBottom: '10px',
-            backgroundColor: '#f9f9f9'
-          }}>
-            {messages.length === 0 ? (
-              <div style={{ 
-                textAlign: 'center', 
-                color: '#666',
-                padding: '20px'
-              }}>
-                <p>Iniciando sua história épica...</p>
-              </div>
-            ) : (
-              messages.map((message, index) => (
-                <div key={index} style={{ 
-                  marginBottom: '15px',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: message.role === 'user' ? 'flex-end' : 'flex-start'
-                }}>
-                  <div style={{
-                    maxWidth: '80%',
-                    padding: '10px 15px',
-                    borderRadius: '15px',
-                    backgroundColor: message.role === 'user' ? '#007bff' : '#e9ecef',
-                    color: message.role === 'user' ? 'white' : 'black',
-                    boxShadow: '0 1px 2px rgba(0,0,0,0.1)'
-                  }}>
-                    <div style={{ 
-                      whiteSpace: 'pre-wrap',
-                      lineHeight: '1.4'
-                    }}>
-                      {message.content}
-                    </div>
-                    <div style={{
-                      fontSize: '11px',
-                      opacity: 0.7,
-                      marginTop: '5px',
-                      textAlign: 'right'
-                    }}>
-                      {message.role === 'user' ? 'Você' : 'Narrador'}
-                    </div>
-                  </div>
-                </div>
-              ))
-            )}
-            {loading && (
-              <div style={{ 
-                display: 'flex',
-                justifyContent: 'flex-start',
-                marginBottom: '15px'
-              }}>
-                <div style={{
-                  padding: '10px 15px',
-                  borderRadius: '15px',
-                  backgroundColor: '#e9ecef',
-                  color: '#666',
-                  fontStyle: 'italic'
-                }}>
-                  🔄 Escrevendo...
-                </div>
-              </div>
-            )}
-            <div ref={messagesEndRef} />
-          </div>
-
-          {/* Input de Mensagem */}
-          <div style={{ display: 'flex', gap: '10px' }}>
-            <textarea
-              value={userInput}
-              onChange={(e) => setUserInput(e.target.value)}
-              onKeyPress={handleKeyPress}
-              placeholder="Descreva sua ação ou fale com os personagens... (Enter para enviar)"
-              rows="2"
-              style={{ 
-                flex: 1,
-                padding: '10px',
-                fontSize: '16px',
-                border: '1px solid #ccc',
-                borderRadius: '5px',
-                resize: 'vertical'
-              }}
-              disabled={loading}
-            />
-            <button 
-              onClick={sendMessage}
-              disabled={loading || !userInput.trim()}
-              style={{ 
-                padding: '10px 20px',
-                fontSize: '16px',
-                backgroundColor: (loading || !userInput.trim()) ? '#ccc' : '#28a745',
-                color: 'white',
-                border: 'none',
-                borderRadius: '5px',
-                cursor: (loading || !userInput.trim()) ? 'not-allowed' : 'pointer',
-                alignSelf: 'flex-end'
-              }}
-            >
-              {loading ? '🔄' : '📤'}
-            </button>
+            <div className="loading-bar">
+              <div className="loading-progress"></div>
+            </div>
           </div>
         </div>
       )}
+
+      {/* Background Elements */}
+      <div className="background-effects">
+        <div className="floating-shapes">
+          <div className="shape shape-1"></div>
+          <div className="shape shape-2"></div>
+          <div className="shape shape-3"></div>
+          <div className="shape shape-4"></div>
+        </div>
+      </div>
+
+      <div className="app-container">
+        {/* Header */}
+        <header className="app-header">
+          <div className="header-content">
+            <div className="logo-section">
+              <div className="logo">📖</div>
+              <h1>Chronicles of Choice</h1>
+            </div>
+            <div className="header-actions">
+              {storyStarted && (
+                <>
+                  <button className="icon-button" onClick={exportStory} title="Exportar História">
+                    💾
+                  </button>
+                  <button className="icon-button" onClick={resetStory} title="Nova História">
+                    🔄
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+        </header>
+
+        {/* Main Content */}
+        <main className="main-content">
+          {!storyStarted ? (
+            // Start Screen
+            <div className="start-screen">
+              <div className="hero-section">
+                <h2>Crie Histórias Épicas com IA</h2>
+                <p>Entre em mundos fantásticos onde suas escolhas moldam o destino</p>
+              </div>
+
+              <div className="setup-panel">
+                {/* Mode Selection */}
+                <section className="mode-section">
+                  <h3>🎮 Escolha seu Modo de Aventura</h3>
+                  <div className="mode-grid">
+                    {availableModes.map(mode => (
+                      <ModeCard
+                        key={mode.id}
+                        mode={mode}
+                        isSelected={currentMode === mode.id}
+                        onClick={setCurrentMode}
+                      />
+                    ))}
+                  </div>
+                </section>
+
+                {/* Context Input */}
+                <section className="context-section">
+                  <h3>✨ Crie seu Contexto</h3>
+                  <div className="context-input-container">
+                    <textarea
+                      value={context}
+                      onChange={(e) => setContext(e.target.value)}
+                      placeholder={`🎭 Descreva seu personagem e mundo...
+
+Exemplos:
+• "Sou um ladino elfo em busca do Cristal Perdido de Eldoria"
+• "Uma estudante universitária descobre poderes mágicos em uma biblioteca antiga"
+• "Um androide ganha consciência em uma sociedade distópica"
+
+Seja criativo! A IA se adaptará à sua visão.`}
+                      rows="6"
+                      className="context-textarea"
+                    />
+                    <div className="textarea-footer">
+                      <span className="char-count">{context.length}/500</span>
+                    </div>
+                  </div>
+                </section>
+
+                {/* Action Button */}
+                <div className="action-section">
+                  <button 
+                    onClick={startStory}
+                    disabled={loading || !context.trim()}
+                    className={`start-button ${loading ? 'loading' : ''}`}
+                  >
+                    {loading ? (
+                      <>
+                        <div className="button-spinner"></div>
+                        Iniciando Aventura...
+                      </>
+                    ) : (
+                      <>
+                        🚀 Iniciar Jornada Épica
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : (
+            // Chat Interface
+            <div className="chat-interface">
+              <div className="chat-header">
+                <div className="chat-info">
+                  <span className="mode-badge">
+                    {availableModes.find(m => m.id === currentMode)?.name}
+                  </span>
+                  <span className="message-count">
+                    {messages.length} mensagens
+                  </span>
+                </div>
+                <div className="chat-actions">
+                  <button className="action-btn secondary" onClick={exportStory}>
+                    💾 Exportar
+                  </button>
+                  <button className="action-btn primary" onClick={resetStory}>
+                    🎮 Nova História
+                  </button>
+                </div>
+              </div>
+
+              {/* Messages Container */}
+              <div className="messages-container">
+                {messages.length === 0 ? (
+                  <div className="empty-state">
+                    <div className="empty-icon">📖</div>
+                    <h3>Sua História Começa Aqui</h3>
+                    <p>Escreva sua primeira mensagem para dar início à aventura!</p>
+                  </div>
+                ) : (
+                  messages.map((message, index) => (
+                    <div 
+                      key={index} 
+                      className={`message ${message.role} ${index === messages.length - 1 ? 'last' : ''}`}
+                    >
+                      <div className="message-avatar">
+                        {message.role === 'user' ? '👤' : '🤖'}
+                      </div>
+                      <div className="message-content">
+                        <div className="message-bubble">
+                          <div className="message-text">
+                            {message.content}
+                          </div>
+                          <div className="message-time">
+                            {new Date(message.timestamp).toLocaleTimeString([], { 
+                              hour: '2-digit', 
+                              minute: '2-digit' 
+                            })}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                )}
+                
+                {/* Loading Message */}
+                {loading && (
+                  <div className="message assistant loading">
+                    <div className="message-avatar">
+                      🤖
+                    </div>
+                    <div className="message-content">
+                      <div className="message-bubble">
+                        <div className="typing-indicator">
+                          <span></span>
+                          <span></span>
+                          <span></span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                
+                <div ref={messagesEndRef} className="scroll-anchor" />
+              </div>
+
+              {/* Input Area */}
+              <div className="input-area">
+                <div className="input-container">
+                  <textarea
+                    value={userInput}
+                    onChange={(e) => setUserInput(e.target.value)}
+                    onKeyPress={handleKeyPress}
+                    placeholder="🎭 Descreva sua ação, fale com personagens ou tome uma decisão importante..."
+                    rows="2"
+                    disabled={loading}
+                    className="message-input"
+                  />
+                  <button 
+                    onClick={sendMessage}
+                    disabled={loading || !userInput.trim()}
+                    className="send-button"
+                  >
+                    {loading ? (
+                      <div className="send-spinner"></div>
+                    ) : (
+                      '📤'
+                    )}
+                  </button>
+                </div>
+                <div className="input-hint">
+                  Pressione Enter para enviar • Shift+Enter para nova linha
+                </div>
+              </div>
+            </div>
+          )}
+        </main>
+
+        {/* Footer */}
+        <footer className="app-footer">
+          <p>Criado com 💖 usando Mistral AI • Sua imaginação é o limite</p>
+        </footer>
+      </div>
     </div>
   )
 }
